@@ -1,53 +1,26 @@
 {
-  description = "Development shell for zp";
-
+  description = "zp";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs, ... }:
-    let
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-        "aarch64-darwin"
-      ];
-      forAllSystems = function:
-        nixpkgs.lib.genAttrs systems (system: function (import nixpkgs {
-          inherit system;
-        }));
-      packageFor = pkgs: pkgs.stdenv.mkDerivation {
+  outputs = {nixpkgs, ...}:
+    nixpkgs.lib.genAttrs ["x86_64-linux" "aarch64-linux" "aarch64-darwin"] (system: let
+      pkgs = import nixpkgs {inherit system;};
+    in {
+      packages.default = pkgs.stdenv.mkDerivation {
         pname = "zp";
         version = "0.3.1";
-        src = self;
-        nativeBuildInputs = [ pkgs.zig_0_16 ];
+        src = ./.;
+        nativeBuildInputs = [pkgs.zig_0_16];
         buildPhase = "zig build -Doptimize=ReleaseSafe";
         installPhase = ''
           mkdir -p $out/bin
-          cp zig-out/bin/zp $out/bin/zp
+          cp zig-out/bin/zp $out/bin/
         '';
-        meta.mainProgram = "zp";
       };
-    in
-    {
-      packages = forAllSystems (pkgs: {
-        default = packageFor pkgs;
-        zp = packageFor pkgs;
-      });
-
-      apps = forAllSystems (pkgs: {
-        default = {
-          type = "app";
-          program = "${packageFor pkgs}/bin/zp";
-        };
-        zp = {
-          type = "app";
-          program = "${packageFor pkgs}/bin/zp";
-        };
-      });
-
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          packages = [ pkgs.zig_0_16 ];
-        };
-      });
-    };
+      devShells.default = pkgs.mkShell {
+        packages = with pkgs; [
+          zig_0_16
+        ];
+      };
+    });
 }
