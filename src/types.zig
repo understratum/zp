@@ -1,1 +1,1 @@
-pub const Error = error{ PkgNotFound, BuildError, MalformedLine, NoURLFound, VersionNotFound };
+pub const Error = error{ PkgNotFound, BuildError, MalformedLine, NoURLFound, VersionNotFound, ProcessFailed };

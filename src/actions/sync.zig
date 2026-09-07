@@ -117,9 +117,10 @@ pub fn init(io: anytype, allocator: std.mem.Allocator) !void {
     const file_zp = try Dir.createFileAbsolute(io, "/var/zp/mirrors/zp.packages", .{});
     defer file_zp.close(io);
 
+    var write_pos: u64 = 0;
     for (massive.items) |item| {
-        const stat = try file_zp.stat(io);
-        try file_zp.writePositionalAll(io, item, stat.size);
+        try file_zp.writePositionalAll(io, item, write_pos);
+        write_pos += item.len;
     }
 
     const pkgs = try Dir.createFileAbsolute(io, "/var/zp/install/packages.db", .{});
@@ -130,7 +131,9 @@ pub fn init(io: anytype, allocator: std.mem.Allocator) !void {
 
 fn replaceAll(allocator: std.mem.Allocator, stack_const: []const u8, needle: []const u8, replace_path: []const u8) ![]u8 {
     if (std.mem.indexOf(u8, stack_const, needle) == null) {
-        return try allocator.dupe(u8, stack_const);
+        const result = try allocator.dupe(u8, stack_const);
+        allocator.free(stack_const);
+        return result;
     }
     var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(allocator);

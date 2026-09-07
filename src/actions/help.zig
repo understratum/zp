@@ -15,7 +15,7 @@ pub const HELP_TEXT =
     \\  version       Show version information and exit
     \\  update        Update system packages with current mirrors
     \\  list          Print your installed pkgs
-    \\  
+    \\
     \\
     \\Examples:
     \\  sudo zp init                # Initialize the package manager
