@@ -16,7 +16,7 @@
       in {
         default = pkgs.stdenv.mkDerivation {
           pname = "zp";
-          version = "0.3.1";
+          version = "0.4.0";
 
           src = ./.;
 

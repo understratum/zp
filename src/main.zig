@@ -53,15 +53,32 @@ pub fn main(init: std.process.Init) !void {
             std.log.err("Package unspecified", .{});
             help();
         } else {
+            const ThreadResult = struct {
+                err: ?anyerror,
+            };
+            const results = try allocator.alloc(ThreadResult, pkgs.items.len);
+            for (results) |*r| r.* = .{ .err = null };
+
             var threads = try allocator.alloc(std.Thread, pkgs.items.len);
 
             for (pkgs.items, 0..) |pkg, i| {
-                // try add(init, pkg, allocator);
-                threads[i] = try std.Thread.spawn(.{}, add, .{ init, pkg, allocator });
+                threads[i] = try std.Thread.spawn(.{}, struct {
+                    fn run(index: usize, init_: std.process.Init, pkg_: []const u8, allocator_: std.mem.Allocator, results_: []ThreadResult) void {
+                        add(init_, pkg_, allocator_) catch |err| {
+                            results_[index].err = err;
+                        };
+                    }
+                }.run, .{ i, init, pkg, allocator, results });
             }
 
             for (threads) |t| {
                 t.join();
+            }
+
+            for (pkgs.items, results) |pkg, r| {
+                if (r.err) |err| {
+                    std.log.err("failed to add {s}: {}", .{ pkg, err });
+                }
             }
         },
         .remove => for (pkgs.items) |pkg| {

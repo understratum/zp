@@ -1,6 +1,7 @@
 const std = @import("std");
 const p = @import("../parser.zig");
 const Dir = std.Io.Dir;
+const linux = std.os.linux;
 
 const BuildSystem = enum { autotools, cmake, meson, make, unknown, cargo, zig, setup_py };
 
@@ -12,7 +13,11 @@ pub fn runProcess(io: anytype, argv: []const []const u8, path: []const u8) !void
         .stderr = .inherit,
         .stdin = .inherit,
     });
-    _ = try child.wait(io);
+    const wait = try child.wait(io);
+    if (wait != .exited or wait.exited != 0) {
+        std.log.err("command failed: {s}", .{argv[0]});
+        return error.ProcessFailed;
+    }
 }
 
 fn hasFile(dir: Dir, io: anytype, name: []const u8) bool {
@@ -250,7 +255,8 @@ pub fn removePkgEntry(init: std.process.Init, file: []const u8, pkg: []const u8,
     defer open_file.close(init.io);
 
     var reader = open_file.reader(init.io, buffer);
-    const tmp_path = "/var/zp/install/packages.db.tmp";
+    var tmp_path_buf: [4096]u8 = undefined;
+    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "{s}.tmp.{d}", .{ file, linux.getpid() });
     const tmp_file = try Dir.createFileAbsolute(init.io, tmp_path, .{});
     defer tmp_file.close(init.io);
 
