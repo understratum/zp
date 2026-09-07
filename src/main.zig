@@ -1,17 +1,15 @@
 const std = @import("std");
-const initialize = @import("actions/init.zig").init;
+const initialize = @import("actions/sync.zig").init;
 const help = @import("actions/help.zig").help;
 const version = @import("actions/version.zig").version;
 const add = @import("actions/add.zig").add;
 const remove = @import("actions/remove.zig").remove;
-const sync = @import("actions/sync.zig").sync;
 const u = @import("actions/update.zig");
 const list = @import("actions/list.zig").list;
 const search = @import("actions/search.zig").search;
 const StrList = std.ArrayList([]const u8);
 
 const Action = enum {
-    init,
     help,
     version,
     add,
@@ -49,7 +47,6 @@ pub fn main(init: std.process.Init) !void {
     const action = std.meta.stringToEnum(Action, strAction orelse "") orelse .help;
 
     switch (action) {
-        .init => try initialize(init.io),
         .help => help(),
         .version => version(),
         .add => if (pkgs.items.len == 0) {
@@ -70,7 +67,7 @@ pub fn main(init: std.process.Init) !void {
         .remove => for (pkgs.items) |pkg| {
             try remove(init, pkg);
         },
-        .sync => try sync(init),
+        .sync => _ = try initialize(init.io, allocator),
         .update => if (pkgs.items.len == 0) {
             try u.updateAll(init);
         } else {

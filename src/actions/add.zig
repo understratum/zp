@@ -178,7 +178,10 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
 
     var tar_cmd_buf: [8096]u8 = undefined;
 
-    try Dir.createDirAbsolute(init.io, try std.fmt.bufPrint(&tar_cmd_buf, "/var/zp/build/{s}", .{pkg_item}), .default_dir);
+    Dir.createDirAbsolute(init.io, try std.fmt.bufPrint(&tar_cmd_buf, "/var/zp/build/{s}", .{pkg_item}), .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
     const tar_cmd = try std.fmt.bufPrint(&tar_cmd_buf, "tar -xf /var/zp/install/{s} -C /var/zp/build/{s} --strip-components=1", .{ file_name, pkg_item });
     const argv_tar = [_][]const u8{ "sh", "-c", tar_cmd };
     try runProcess(init.io, &argv_tar, "/var/zp/install/");
@@ -188,7 +191,10 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     std.log.info("Install '{s}'...\n", .{pkg_item});
     const pkg_bin = try std.fmt.allocPrint(allocator, "/var/zp/pkg/{s}", .{pkg_item});
     defer allocator.free(pkg_bin);
-    try Dir.createDirAbsolute(init.io, pkg_bin, .default_dir);
+    Dir.createDirAbsolute(init.io, pkg_bin, .default_dir) catch |err| switch (err) {
+        error.PathAlreadyExists => {},
+        else => return err,
+    };
     try buildAndInstall(init, src, pkg_bin);
 
     var pkg_dir = try Dir.openDirAbsolute(init.io, pkg_bin, .{ .iterate = true });
