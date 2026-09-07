@@ -8,13 +8,11 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ];
       forAllSystems = function:
         nixpkgs.lib.genAttrs systems (system: function (import nixpkgs {
           inherit system;
-          config.allowUnsupportedSystem = true;
         }));
       packageFor = pkgs: pkgs.stdenv.mkDerivation {
         pname = "zp";
