@@ -1,7 +1,6 @@
 const std = @import("std");
 const p = @import("../parser.zig");
 const Dir = std.Io.Dir;
-const linux = std.os.linux;
 
 const BuildSystem = enum { autotools, cmake, meson, make, unknown, cargo, zig, setup_py };
 
@@ -13,11 +12,7 @@ pub fn runProcess(io: anytype, argv: []const []const u8, path: []const u8) !void
         .stderr = .inherit,
         .stdin = .inherit,
     });
-    const wait = try child.wait(io);
-    if (wait != .exited or wait.exited != 0) {
-        std.log.err("command failed: {s}", .{argv[0]});
-        return error.ProcessFailed;
-    }
+    _ = try child.wait(io);
 }
 
 fn hasFile(dir: Dir, io: anytype, name: []const u8) bool {
@@ -58,22 +53,32 @@ pub fn buildAndInstall(init: std.process.Init, src: []const u8, pkg_bin: []const
                 }
             }
             try runProcess(init.io, &[_][]const u8{ "./configure", "--prefix=/usr" }, src);
-            try runProcess(init.io, &[_][]const u8{ "make", j_flag }, src);
-            try runProcess(init.io, &[_][]const u8{ "make", "install", try std.fmt.allocPrint(allocator, "DESTDIR={s}", .{pkg_bin}) }, src);
+            runProcess(init.io, &[_][]const u8{ "make", j_flag }, src) catch {
+                return error.MakeNotFound;
+            };
+            runProcess(init.io, &[_][]const u8{ "make", "install", try std.fmt.allocPrint(allocator, "DESTDIR={s}", .{pkg_bin}) }, src) catch {
+                return error.MakeNotFound;
+            };
         },
         .cmake => {
-            try runProcess(init.io, &[_][]const u8{ "cmake", "-B", "_zb", "-DCMAKE_INSTALL_PREFIX=/usr" }, src);
-            try runProcess(init.io, &[_][]const u8{ "cmake", "--build", "_zb", "--parallel", try std.fmt.allocPrint(allocator, "{}", .{cpu_count}) }, src);
-            try runProcess(init.io, &[_][]const u8{ "cmake", "--install", "_zb" }, src);
+            runProcess(init.io, &[_][]const u8{ "cmake", "-B", "_zb", "-DCMAKE_INSTALL_PREFIX=/usr" }, src) catch {
+                return error.CmakeNotFound;
+            };
+            runProcess(init.io, &[_][]const u8{ "cmake", "--build", "_zb", "--parallel", try std.fmt.allocPrint(allocator, "{}", .{cpu_count}) }, src) catch {
+                return error.CmakeNotFound;
+            };
+            runProcess(init.io, &[_][]const u8{ "cmake", "--install", "_zb" }, src) catch {
+                return error.CmakeNotFound;
+            };
         },
         .meson => {
-            try runProcess(init.io, &[_][]const u8{ "meson", "setup", "_zb", "--prefix=/usr" }, src);
-            try runProcess(init.io, &[_][]const u8{ "meson", "compile", "-C", "_zb" }, src);
-            try runProcess(init.io, &[_][]const u8{ "meson", "install", "-C", "_zb", "--destdir", pkg_bin }, src);
+            runProcess(init.io, &[_][]const u8{ "meson", "setup", "_zb", "--prefix=/usr" }, src) catch return error.MesonNotFound;
+            runProcess(init.io, &[_][]const u8{ "meson", "compile", "-C", "_zb" }, src) catch return error.MesonNotFound;
+            runProcess(init.io, &[_][]const u8{ "meson", "install", "-C", "_zb", "--destdir", pkg_bin }, src) catch return error.MesonNotFound;
         },
         .make => {
-            try runProcess(init.io, &[_][]const u8{ "make", j_flag }, src);
-            try runProcess(init.io, &[_][]const u8{ "make", "install", try std.fmt.allocPrint(allocator, "DESTDIR={s}", .{pkg_bin}) }, src);
+            runProcess(init.io, &[_][]const u8{ "make", j_flag }, src) catch return error.MakeNotFound;
+            runProcess(init.io, &[_][]const u8{ "make", "install", try std.fmt.allocPrint(allocator, "DESTDIR={s}", .{pkg_bin}) }, src) catch return error.MakeNotFound;
         },
         .cargo => {
             const argv = [_][]const u8{
@@ -84,7 +89,7 @@ pub fn buildAndInstall(init: std.process.Init, src: []const u8, pkg_bin: []const
                 "--path",
                 ".",
             };
-            try runProcess(init.io, &argv, src);
+            runProcess(init.io, &argv, src) catch return error.CargoNotFound;
         },
         .setup_py => {
             const argv_setup = [_][]const u8{
@@ -94,7 +99,7 @@ pub fn buildAndInstall(init: std.process.Init, src: []const u8, pkg_bin: []const
                 "--prefix=/usr",
                 try std.fmt.allocPrint(allocator, "--root={s}", .{pkg_bin}),
             };
-            try runProcess(init.io, &argv_setup, src);
+            runProcess(init.io, &argv_setup, src) catch return error.SetupPyNotFound;
             if (hasFile(src_dir, init.io, "pyproject.toml")) {
                 const argv_pip = [_][]const u8{
                     "pip",
@@ -103,7 +108,7 @@ pub fn buildAndInstall(init: std.process.Init, src: []const u8, pkg_bin: []const
                     try std.fmt.allocPrint(allocator, "--root={s}", .{pkg_bin}),
                     ".",
                 };
-                try runProcess(init.io, &argv_pip, src);
+                runProcess(init.io, &argv_pip, src) catch return error.PipNotFound;
             }
         },
         .zig => {
@@ -255,8 +260,7 @@ pub fn removePkgEntry(init: std.process.Init, file: []const u8, pkg: []const u8,
     defer open_file.close(init.io);
 
     var reader = open_file.reader(init.io, buffer);
-    var tmp_path_buf: [4096]u8 = undefined;
-    const tmp_path = try std.fmt.bufPrint(&tmp_path_buf, "{s}.tmp.{d}", .{ file, linux.getpid() });
+    const tmp_path = "/var/zp/install/packages.db.tmp";
     const tmp_file = try Dir.createFileAbsolute(init.io, tmp_path, .{});
     defer tmp_file.close(init.io);
 
