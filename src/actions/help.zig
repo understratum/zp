@@ -6,7 +6,6 @@ pub const HELP_TEXT =
     \\Usage: zp [OPTIONS] [PACKAGE...]
     \\
     \\Options:
-    \\  init          Initialize /var/zp and generate gen.sh
     \\  sync          Sync recipe trees and regenerate the database
     \\  search <pkg>  Search for a package in the database
     \\  add <pkg>     Download, build, and install a package from source
@@ -18,8 +17,7 @@ pub const HELP_TEXT =
     \\
     \\
     \\Examples:
-    \\  sudo zp init                # Initialize the package manager
-    \\  sudo zp sync                # Sync recipe trees (Void + Crux + KISS)
+    \\  sudo zp sync                # Sync recipe trees (Void)
     \\  sudo zp search htop         # Search for htop
     \\  sudo zp add htop            # Build & install htop from source
     \\  sudo zp remove htop         # Remove htop
@@ -27,7 +25,7 @@ pub const HELP_TEXT =
     \\  sudo zp update              # Upgrade your system
     \\  sudo zp list                # Print your installed pkgs
     \\
-    \\For more information, visit: https://github.com/understrata/zp/
+    \\For more information, visit: https://github.com/understratum/zp/
 ;
 
 pub fn help() void {
