@@ -98,7 +98,7 @@ htop 3.5.3 https://github.com/htop-dev/htop/releases/download/3.5.3/htop-3.5.3.t
 ## Requirements
 
 - **Zig 0.16** (compiler)
-- **Build tools:** `git`, `curl`, `tar`, `bash`, `awk`, `cargo` (for rust pkgs), `python` (for python pkgs)
+- **Build tools:** `git`, `curl`, `tar`, `cargo` (for rust pkgs), `python` (for python pkgs)
 - **C toolchain:** `gcc`, `make` (for building packages)
 
 ---
@@ -131,7 +131,6 @@ sudo zp sync
 
 | Command | Description |
 |---------|-------------|
-| `zp init` | Initialize `/var/zp` and generate `gen.sh` |
 | `zp sync` | Update recipe trees and regenerate database |
 | `zp add <pkg>` | Download, build, and install package |
 | `zp remove <pkg>` | Remove installed package |
@@ -179,7 +178,6 @@ zp/
 │   ├── parser.zig     # Database parsing, file operations
 │   ├── types.zig      # Type definitions, constants
 │   └── actions/
-│       ├── init.zig   # zp init
 │       ├── sync.zig   # zp sync
 │       ├── add.zig    # zp add
 │       ├── remove.zig # zp remove
