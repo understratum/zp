@@ -8,6 +8,7 @@ const u = @import("actions/update.zig");
 const list = @import("actions/list.zig").list;
 const search = @import("actions/search.zig").search;
 const StrList = std.ArrayList([]const u8);
+const linux = std.os.linux;
 
 const Action = enum {
     help,
@@ -94,7 +95,14 @@ pub fn main(init: std.process.Init) !void {
         },
         .list => try list(allocator),
         .search => for (pkgs.items) |pkg| {
-            try search(init, pkg);
+            var result = try search(init, pkg, allocator);
+            defer result.deinit(allocator);
+
+            for (result.items) |item| {
+                const item_len: []const u8 = std.mem.span(item);
+                _ = linux.write(1, item, item_len.len);
+                _ = linux.write(1, "\n", 1);
+            }
         },
     }
 }
