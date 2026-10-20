@@ -98,6 +98,7 @@ pub fn main(init: std.process.Init) !void {
             var result = try search(init, pkg, allocator);
             defer result.deinit(allocator);
 
+            // TODO: optimize syscalls
             for (result.items) |item| {
                 const item_len: []const u8 = std.mem.span(item);
                 _ = linux.write(1, item, item_len.len);
