@@ -23,14 +23,6 @@ Fetch. Build. Install. From source; no prebuilt binaries.
 ## Features
 
 - **Source-based installation**: complete `fetch → unpack → build → install` pipeline
-- **Build system auto-detection**:
-  - `configure` (autotools)
-  - `CMakeLists.txt` (cmake)
-  - `meson.build` (meson)
-  - `setup.py` (python)
-  - `cargo build` (rust)
-  - `build.zig` (zig)
-  - `Makefile` / `makefile` / `GNUmakefile` (make)
 - **File tracking**: tracks installed files for proper removal
 - **Parallel downloads**: multiple packages download simultaneously
 
@@ -53,12 +45,8 @@ zp add <pkg>
 
 ### Package Database
 
-**Location**: `/var/zp/mirrors/zp.packages`  
-**Format**: `<name> <version> <url>` (space-separated, one package per line)
-**Example entry**:
-```
-htop 3.5.3 https://github.com/htop-dev/htop/releases/download/3.5.3/htop-3.5.3.tar.xz
-```
+**Location**: `/var/zp/mirrors/zp-repo/pkgs/`  
+**Format**: `<name.zon> <BuildFile> <update.json (for packages not from GitHub)>`
 
 ---
 
@@ -72,7 +60,7 @@ htop 3.5.3 https://github.com/htop-dev/htop/releases/download/3.5.3/htop-3.5.3.t
 ├── installed/       # File lists for installed packages
 │   ├── htop.list
 │   └── curl.list
-└── mirrors/         # Recipe trees + zp.packages
+└── mirrors/         # Recipe trees
 ```
 
 ---
@@ -80,10 +68,6 @@ htop 3.5.3 https://github.com/htop-dev/htop/releases/download/3.5.3/htop-3.5.3.t
 ## Requirements
 
 - **Tools**: `git`, `curl`, `tar` (for all packages)
-- **C**: `gcc`, `make` (for C/C++ packages)
-- **Zig**: `zig` 0.16.0 (for Zig packages)
-- **Rust**: `cargo` (for Rust crates)
-- **Python**: `python` (for python scripts)
 
 ---
 
@@ -98,7 +82,7 @@ cd zp
 zig build
 
 # Install binary (optional)
-sudo cp zig-out/bin/zp /usr/local/bin/
+sudo cp zig-out/bin/zp /usr/local/bin/ # or /usr/bin/
 
 # Sync package database
 sudo zp sync
@@ -187,7 +171,6 @@ zig build -Doptimize=ReleaseSafe
 ## Known Limitations
 
 - **No dependency resolution**: packages must be installed manually in correct order
-- **No rollback**: failed builds leave partial state
 - **Requires root**: installation writes to system directories
 
 ---
