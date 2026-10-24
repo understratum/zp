@@ -102,6 +102,8 @@ fn record(io: anytype, list_file: std.Io.File, write_pos: *u64, dest_path: []con
 }
 
 pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator) !void {
+    const root = try Dir.openDirAbsolute(init.io, "/", .{});
+    defer root.close(init.io);
     const pkg = try p.GetPkgStatToInstall(pkg_item, allocator);
     const file_name = if (std.mem.lastIndexOfScalar(u8, pkg.url, '/')) |i| pkg.url[i + 1 ..] else pkg.url;
 
@@ -138,11 +140,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     var tar_cmd_buf: [8096]u8 = undefined;
 
     const build_dir = try std.fmt.allocPrint(allocator, "/var/zp/build/{s}", .{pkg_item});
-    Dir.deleteDirAbsolute(init.io, build_dir) catch |err| switch (err) {
-        error.FileNotFound => {},
-        error.DirNotEmpty => {},
-        else => return err,
-    };
+    try root.deleteTree(init.io, build_dir);
 
     Dir.createDirAbsolute(init.io, try std.fmt.bufPrint(&tar_cmd_buf, "/var/zp/build/{s}", .{pkg_item}), .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
@@ -166,11 +164,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
             const massive = [_][]const u8{ path_buf, build_dir };
 
             inline for (massive) |item| {
-                Dir.deleteDirAbsolute(init.io, item) catch |err_delete| switch (err_delete) {
-                    error.FileNotFound => {},
-                    error.DirNotEmpty => {},
-                    else => return err_delete,
-                };
+                try root.deleteTree(init.io, item);
             }
         },
         else => return err,

@@ -7,6 +7,7 @@ const remove = @import("actions/remove.zig").remove;
 const u = @import("actions/update.zig");
 const list = @import("actions/list.zig").list;
 const search = @import("actions/search.zig").search;
+const info = @import("actions/info.zig").info;
 const StrList = std.ArrayList([]const u8);
 const linux = std.os.linux;
 
@@ -19,6 +20,7 @@ const Action = enum {
     update,
     list,
     search,
+    info,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -101,6 +103,11 @@ pub fn main(init: std.process.Init) !void {
             // TODO: optimize syscalls
             for (result.items) |item| {
                 std.debug.print("{s}\n", .{item});
+            }
+        },
+        .info => {
+            for (pkgs.items) |item| {
+                try info(item, allocator);
             }
         },
     }

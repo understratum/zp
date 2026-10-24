@@ -14,6 +14,7 @@ pub const HELP_TEXT =
     \\  version       Show version information and exit
     \\  update        Update system packages with current mirrors
     \\  list          Print your installed pkgs
+    \\  info <pkg>    Print info about package
     \\
     \\
     \\Examples:
@@ -24,6 +25,7 @@ pub const HELP_TEXT =
     \\  sudo zp update htop         # Upgrade htop on new version
     \\  sudo zp update              # Upgrade your system
     \\  sudo zp list                # Print your installed pkgs
+    \\  sudo zp info htop           # Print about htop
     \\
     \\For more information, visit: https://github.com/understratum/zp/
 ;
