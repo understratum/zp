@@ -37,10 +37,11 @@ zp add <pkg>
    │
    ├─ 1. Lookup <pkg> in /var/zp/mirrors/zp-repo/pkgs/<pkg>/<pkg>.zon
    ├─ 2. Download source tarball → /var/zp/install/
-   ├─ 3. Extract → /var/zp/build/<pkg> (tar --strip-components=1)
-   ├─ 4. Detect the build system and then compile the package
-   ├─ 5. Copy staged files → system root (/)
-   └─ 6. Write file list → /var/zp/installed/<pkg>.list
+   ├─ 3. Check sha256 hash
+   ├─ 4. Extract → /var/zp/build/<pkg> (tar --strip-components=1)
+   ├─ 5. Detect the build system and then compile the package
+   ├─ 6. Copy staged files → system root (/)
+   └─ 7. Write file list → /var/zp/installed/<pkg>.list
 ```
 
 ### Package Database
