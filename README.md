@@ -35,7 +35,7 @@ Fetch. Build. Install. From source; no prebuilt binaries.
 ```
 zp add <pkg>
    │
-   ├─ 1. Lookup <pkg> in /var/zp/mirrors/zp.packages
+   ├─ 1. Lookup <pkg> in /var/zp/mirrors/zp-repo/<pkg>/<pkg>.zon
    ├─ 2. Download source tarball → /var/zp/install/
    ├─ 3. Extract → /var/zp/build/<pkg> (tar --strip-components=1)
    ├─ 4. Detect the build system and then compile the package
