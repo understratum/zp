@@ -2,7 +2,7 @@
 
 Source-based package manager written in Zig.
 
-[![Zig](https://img.shields.io/badge/Zig-0.16-orange)](https://ziglang.org)
+[![Zig](https://img.shields.io/badge/Zig-0.17-orange)](https://ziglang.org)
 [![License](https://img.shields.io/badge/License-MIT-green)](./LICENSE)
 
 Fetch. Build. Install. From source; no prebuilt binaries.
@@ -16,8 +16,6 @@ Fetch. Build. Install. From source; no prebuilt binaries.
 
 **Key characteristics**:
 - Single static binary
-- Void's package database
-- Automatic build system detection (autotools, cmake, meson, make)
 - File tracking for clean package removal
 
 ---
