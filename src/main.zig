@@ -85,7 +85,7 @@ pub fn main(init: std.process.Init) !void {
         .remove => for (pkgs.items) |pkg| {
             try remove(init, pkg);
         },
-        .sync => _ = try initialize(init.io, allocator),
+        .sync => _ = try initialize(init.io),
         .update => if (pkgs.items.len == 0) {
             try u.updateAll(init);
         } else {
@@ -95,14 +95,12 @@ pub fn main(init: std.process.Init) !void {
         },
         .list => try list(allocator),
         .search => for (pkgs.items) |pkg| {
-            var result = try search(init, pkg, allocator);
+            var result = try search(pkg, allocator);
             defer result.deinit(allocator);
 
             // TODO: optimize syscalls
             for (result.items) |item| {
-                const item_len: []const u8 = std.mem.span(item);
-                _ = linux.write(1, item, item_len.len);
-                _ = linux.write(1, "\n", 1);
+                std.debug.print("{s}\n", .{item});
             }
         },
     }

@@ -1,8 +1,25 @@
 const std = @import("std");
 const p = @import("../parser.zig");
 const Dir = std.Io.Dir;
+const zsys = @import("../libs/zsys/zsys.zig");
+const Sha256 = std.crypto.hash.sha2.Sha256;
 
-const BuildSystem = enum { autotools, cmake, meson, make, unknown, cargo, zig, setup_py };
+pub fn checkHex(src: []const u8, expected_hash: []const u8, allocator: std.mem.Allocator) !bool {
+    var hasher = Sha256.init(.{});
+
+    var file = try zsys.File.openFile(src, .{ .type = .read });
+    defer file.close();
+
+    var read = try file.readMmap();
+    defer read.deinit();
+
+    hasher.update(read.slice());
+    const digest = hasher.finalResult();
+
+    const hex: []const u8 = try std.fmt.allocPrint(allocator, "{s}", .{std.fmt.bytesToHex(digest, .lower)});
+
+    return std.mem.eql(u8, hex, expected_hash);
+}
 
 pub fn runProcess(io: anytype, argv: []const []const u8, path: []const u8) !void {
     var child = try std.process.spawn(io, .{
@@ -12,120 +29,10 @@ pub fn runProcess(io: anytype, argv: []const []const u8, path: []const u8) !void
         .stderr = .inherit,
         .stdin = .inherit,
     });
-    _ = try child.wait(io);
-}
-
-fn hasFile(dir: Dir, io: anytype, name: []const u8) bool {
-    _ = dir.statFile(io, name, .{}) catch return false;
-    return true;
-}
-
-fn detectBuildSystem(src_dir: Dir, io: anytype) BuildSystem {
-    if (hasFile(src_dir, io, "Cargo.toml")) return .cargo;
-    if (hasFile(src_dir, io, "setup.py")) return .setup_py;
-    if (hasFile(src_dir, io, "pyproject.toml")) return .setup_py;
-    if (hasFile(src_dir, io, "build.zig")) return .zig;
-    if (hasFile(src_dir, io, "configure")) return .autotools;
-    if (hasFile(src_dir, io, "CMakeLists.txt")) return .cmake;
-    if (hasFile(src_dir, io, "meson.build")) return .meson;
-    if (hasFile(src_dir, io, "Makefile") or hasFile(src_dir, io, "makefile") or hasFile(src_dir, io, "GNUmakefile")) {
-        return .make;
-    }
-    return .unknown;
-}
-
-pub fn buildAndInstall(init: std.process.Init, src: []const u8, pkg_bin: []const u8) !void {
-    var src_dir = try Dir.openDirAbsolute(init.io, src, .{});
-    defer src_dir.close(init.io);
-    const allocator = init.arena.allocator();
-    const build_type = detectBuildSystem(src_dir, init.io);
-    const cpu_count = try std.Thread.getCpuCount();
-    const j_flag = try std.fmt.allocPrint(allocator, "-j{}", .{cpu_count});
-
-    switch (build_type) {
-        .autotools => {
-            const autogen_true_false = hasFile(src_dir, init.io, "configure.ac") or hasFile(src_dir, init.io, "configure.in");
-            if (autogen_true_false) {
-                if (hasFile(src_dir, init.io, "autogen.sh")) {
-                    try runProcess(init.io, &[_][]const u8{ "sh", "./autogen.sh" }, src);
-                } else {
-                    try runProcess(init.io, &[_][]const u8{ "autoreconf", "-fi" }, src);
-                }
-            }
-            try runProcess(init.io, &[_][]const u8{ "./configure", "--prefix=/usr" }, src);
-            runProcess(init.io, &[_][]const u8{ "make", j_flag }, src) catch {
-                return error.MakeNotFound;
-            };
-            runProcess(init.io, &[_][]const u8{ "make", "install", try std.fmt.allocPrint(allocator, "DESTDIR={s}", .{pkg_bin}) }, src) catch {
-                return error.MakeNotFound;
-            };
-        },
-        .cmake => {
-            runProcess(init.io, &[_][]const u8{ "cmake", "-B", "_zb", "-DCMAKE_INSTALL_PREFIX=/usr" }, src) catch {
-                return error.CmakeNotFound;
-            };
-            runProcess(init.io, &[_][]const u8{ "cmake", "--build", "_zb", "--parallel", try std.fmt.allocPrint(allocator, "{}", .{cpu_count}) }, src) catch {
-                return error.CmakeNotFound;
-            };
-            runProcess(init.io, &[_][]const u8{ "cmake", "--install", "_zb" }, src) catch {
-                return error.CmakeNotFound;
-            };
-        },
-        .meson => {
-            runProcess(init.io, &[_][]const u8{ "meson", "setup", "_zb", "--prefix=/usr" }, src) catch return error.MesonNotFound;
-            runProcess(init.io, &[_][]const u8{ "meson", "compile", "-C", "_zb" }, src) catch return error.MesonNotFound;
-            runProcess(init.io, &[_][]const u8{ "meson", "install", "-C", "_zb", "--destdir", pkg_bin }, src) catch return error.MesonNotFound;
-        },
-        .make => {
-            runProcess(init.io, &[_][]const u8{ "make", j_flag }, src) catch return error.MakeNotFound;
-            runProcess(init.io, &[_][]const u8{ "make", "install", try std.fmt.allocPrint(allocator, "DESTDIR={s}", .{pkg_bin}) }, src) catch return error.MakeNotFound;
-        },
-        .cargo => {
-            const argv = [_][]const u8{
-                "cargo",
-                "install",
-                "--root",
-                pkg_bin,
-                "--path",
-                ".",
-            };
-            runProcess(init.io, &argv, src) catch return error.CargoNotFound;
-        },
-        .setup_py => {
-            const argv_setup = [_][]const u8{
-                "python",
-                "setup.py",
-                "install",
-                "--prefix=/usr",
-                try std.fmt.allocPrint(allocator, "--root={s}", .{pkg_bin}),
-            };
-            runProcess(init.io, &argv_setup, src) catch return error.SetupPyNotFound;
-            if (hasFile(src_dir, init.io, "pyproject.toml")) {
-                const argv_pip = [_][]const u8{
-                    "pip",
-                    "install",
-                    "--prefix=/usr",
-                    try std.fmt.allocPrint(allocator, "--root={s}", .{pkg_bin}),
-                    ".",
-                };
-                runProcess(init.io, &argv_pip, src) catch return error.PipNotFound;
-            }
-        },
-        .zig => {
-            const argv = [_][]const u8{
-                "zig",
-                "build",
-                "install",
-                "--prefix",
-                "/usr",
-                try std.fmt.allocPrint(allocator, "--sysroot={s}", .{pkg_bin}),
-            };
-            try runProcess(init.io, &argv, src);
-        },
-        .unknown => {
-            std.log.err("No make files found in {s}", .{src});
-            return error.UnknownBuildSystem;
-        },
+    const term = try child.wait(io);
+    switch (term) {
+        .exited => |code| if (code != 0) return error.ProcessFailed,
+        else => return error.ProcessFailed,
     }
 }
 
@@ -173,20 +80,69 @@ pub fn copy(io: anytype, allocator: std.mem.Allocator, src_dir: Dir, dest_dir: D
                 write_pos += abs_path.len;
             },
             .directory => try createDirPath(io, dest_dir, dest_path),
+            .sym_link => {
+                var target_buf: [4096]u8 = undefined;
+                const len = try entry.dir.readLink(io, entry.basename, &target_buf);
+                const target = target_buf[0..len];
+
+                dest_dir.deleteFile(io, dest_path) catch {}; // если ссылка уже есть
+                try dest_dir.symLink(io, target, dest_path, .{});
+                try record(io, list_file, &write_pos, dest_path);
+            },
             else => continue,
         }
     }
 }
+
+fn record(io: anytype, list_file: std.Io.File, write_pos: *u64, dest_path: []const u8) !void {
+    var buf: [4096]u8 = undefined;
+    const line = try std.fmt.bufPrint(&buf, "/{s}\n", .{dest_path});
+    _ = try list_file.writePositionalAll(io, line, write_pos.*);
+    write_pos.* += line.len;
+}
+
 pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator) !void {
     const pkg = try p.GetPkgStatToInstall(pkg_item, allocator);
     const file_name = if (std.mem.lastIndexOfScalar(u8, pkg.url, '/')) |i| pkg.url[i + 1 ..] else pkg.url;
 
-    std.log.info("Install tar file...\n", .{});
+    const installedPkgs = try p.GetInstalledPkgs(allocator);
+
+    for (pkg.deps) |dep| {
+        var found = false;
+        for (installedPkgs.items) |item| {
+            if (std.mem.eql(u8, item, dep)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) try add(init, dep, allocator);
+    }
+
+    std.log.info("Installing tar file '{s}'...\n", .{pkg_item});
 
     const argv = [_][]const u8{ "curl", "-fSL", "-o", file_name, pkg.url };
     try runProcess(init.io, &argv, "/var/zp/install/");
+    const path_buf: []const u8 = try std.fmt.allocPrint(allocator, "/var/zp/install/{s}", .{file_name});
+
+    const check = try checkHex(path_buf, pkg.hash, allocator);
+    if (!check) {
+        Dir.deleteFileAbsolute(init.io, path_buf) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => return err,
+        };
+        return error.InvalidHash;
+    }
+
+    std.log.info("hash check: successful\n", .{});
 
     var tar_cmd_buf: [8096]u8 = undefined;
+
+    const build_dir = try std.fmt.allocPrint(allocator, "/var/zp/build/{s}", .{pkg_item});
+    Dir.deleteDirAbsolute(init.io, build_dir) catch |err| switch (err) {
+        error.FileNotFound => {},
+        error.DirNotEmpty => {},
+        else => return err,
+    };
 
     Dir.createDirAbsolute(init.io, try std.fmt.bufPrint(&tar_cmd_buf, "/var/zp/build/{s}", .{pkg_item}), .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
@@ -197,15 +153,28 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     try runProcess(init.io, &argv_tar, "/var/zp/install/");
 
     var buff: [256]u8 = undefined;
-    const src = try std.fmt.bufPrint(&buff, "/var/zp/build/{s}", .{pkg_item});
-    std.log.info("Install '{s}'...\n", .{pkg_item});
+    const src = try std.fmt.bufPrint(&buff, "/var/zp/mirrors/zp-repo/pkgs/{s}/BuildFile", .{pkg_item});
+    std.log.info("Installing '{s}'...\n", .{pkg_item});
     const pkg_bin = try std.fmt.allocPrint(allocator, "/var/zp/pkg/{s}", .{pkg_item});
     defer allocator.free(pkg_bin);
     Dir.createDirAbsolute(init.io, pkg_bin, .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
-    try buildAndInstall(init, src, pkg_bin);
+    runProcess(init.io, &[_][]const u8{ "sh", src }, ".") catch |err| switch (err) {
+        error.ProcessFailed => {
+            const massive = [_][]const u8{ path_buf, build_dir };
+
+            inline for (massive) |item| {
+                Dir.deleteDirAbsolute(init.io, item) catch |err_delete| switch (err_delete) {
+                    error.FileNotFound => {},
+                    error.DirNotEmpty => {},
+                    else => return err_delete,
+                };
+            }
+        },
+        else => return err,
+    };
 
     var pkg_dir = try Dir.openDirAbsolute(init.io, pkg_bin, .{ .iterate = true });
     defer pkg_dir.close(init.io);
