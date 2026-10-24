@@ -81,11 +81,11 @@ htop 3.5.3 https://github.com/htop-dev/htop/releases/download/3.5.3/htop-3.5.3.t
 
 ## Requirements
 
-- **Tools**: `git`, `curl`, `tar`
-- **C**: `gcc`, `make` (for building packages)
-- **Zig**: `zig` 0.16.0 (for zig packages and `zp` itself)
-- **Rust**: `cargo` (for rust packages)
-- **Python**: `python` (for python packages)
+- **Tools**: `git`, `curl`, `tar` (for all packages)
+- **C**: `gcc`, `make` (for C/C++ packages)
+- **Zig**: `zig` 0.16.0 (for Zig packages)
+- **Rust**: `cargo` (for Rust crates)
+- **Python**: `python` (for python scripts)
 
 ---
 
