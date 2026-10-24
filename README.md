@@ -170,7 +170,6 @@ zig build -Doptimize=ReleaseSafe
 
 ## Known Limitations
 
-- **No dependency resolution**: packages must be installed manually in correct order
 - **Requires root**: installation writes to system directories
 
 ---
