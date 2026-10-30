@@ -1,4 +1,4 @@
-pub const Error = error{ PkgNotFound, BuildError, MalformedLine, NoURLFound, VersionNotFound, ProcessFailed };
+pub const Error = error{ PkgNotFound, BuildError, MalformedLine, NoURLFound, VersionNotFound, ProcessFailed, Conflict };
 
 pub const Pkg = struct {
     name: []const u8,

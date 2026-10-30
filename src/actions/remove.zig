@@ -1,6 +1,18 @@
 const std = @import("std");
+const zsys = @import("../libs/zsys/zsys.zig");
 const runProcess = @import("add.zig").runProcess;
 const removePkgEntry = @import("add.zig").removePkgEntry;
+
+const DB_SEP = '\t';
+fn dbPkg(line: []const u8) ?[]const u8 {
+    const i = std.mem.indexOfScalar(u8, line, DB_SEP) orelse return null;
+    return line[0..i];
+}
+
+fn dbPath(line: []const u8) ?[]const u8 {
+    const i = std.mem.indexOfScalar(u8, line, DB_SEP) orelse return null;
+    return line[i + 1 ..];
+}
 
 pub fn remove(init: std.process.Init, pkg_item: []const u8) !void {
     var list_path_buf: [256]u8 = undefined;
@@ -40,10 +52,12 @@ pub fn remove(init: std.process.Init, pkg_item: []const u8) !void {
             },
         };
     }
+
     try removeEmptyDirs(init.io, allocator, file_paths, root_dir);
     try cwd.deleteFile(init.io, list_path);
     var cmd_buf: [4096]u8 = undefined;
     try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item, &cmd_buf);
+    try removePkgFromFilesDb(init, "/var/zp/installed/files.db", pkg_item);
     std.debug.print("Package '{s}' removed successfully\n", .{pkg_item});
 }
 
@@ -85,4 +99,44 @@ pub fn removeEmptyDirs(io: anytype, allocator: std.mem.Allocator, file_paths: st
             },
         };
     }
+}
+
+fn removePkgFromFilesDb(init: std.process.Init, file: []const u8, pkg: []const u8) !void {
+    var file_ = try zsys.File.openFile(file, .{ .type = .read, .create = true });
+    defer file_.close();
+
+    var db = try file_.readMmap();
+    defer db.deinit();
+
+    const tmp_path = "/var/zp/installed/files.db.tmp";
+    const tmp_file = try std.Io.Dir.createFileAbsolute(init.io, tmp_path, .{ .truncate = true });
+    defer tmp_file.close(init.io);
+
+    var kept: usize = 0;
+    var dropped: usize = 0;
+    var pos: u64 = 0;
+
+    var it = std.mem.tokenizeScalar(u8, db.slice(), '\n');
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+
+        const name = dbPkg(line) orelse {
+            std.log.warn("files.db: строка без разделителя, оставляю: {s}", .{line});
+            kept += 1;
+            continue;
+        };
+
+        if (std.mem.eql(u8, name, pkg)) {
+            dropped += 1;
+            continue;
+        }
+
+        var line_buf: [4096]u8 = undefined;
+        const out_line = try std.fmt.bufPrint(&line_buf, "{s}\n", .{line});
+        _ = try tmp_file.writePositionalAll(init.io, out_line, pos);
+        pos += out_line.len;
+        kept += 1;
+    }
+
+    try std.Io.Dir.renameAbsolute(tmp_path, file, init.io);
 }

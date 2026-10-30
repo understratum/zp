@@ -1,8 +1,68 @@
 const std = @import("std");
 const p = @import("../parser.zig");
+const e = @import("../types.zig").Error;
 const Dir = std.Io.Dir;
 const zsys = @import("../libs/zsys/zsys.zig");
 const Sha256 = std.crypto.hash.sha2.Sha256;
+
+pub const ErrorConflict = struct { name: []const u8, path: []const u8, err: ?e = null };
+
+pub fn writeFileDb(init: std.process.Init, list_path: []const u8, pkg: []const u8, allocator: std.mem.Allocator) !void {
+    var list_file = try zsys.File.openFile(list_path, .{ .type = .read });
+    defer list_file.close();
+
+    var list_data = try list_file.readMmap();
+    defer list_data.deinit();
+    var db_file = try zsys.File.openFile("/var/zp/installed/files.db", .{ .type = .read, .create = true });
+    defer db_file.close();
+    var db_data = try db_file.readMmap();
+    defer db_data.deinit();
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    var old = std.mem.tokenizeScalar(u8, db_data.slice(), '\n');
+    while (old.next()) |line| {
+        if (line.len == 0) continue;
+        const tab = std.mem.indexOfScalar(u8, line, '\t') orelse continue;
+        if (std.mem.eql(u8, line[0..tab], pkg)) continue;
+        try out.appendSlice(allocator, line);
+        try out.append(allocator, '\n');
+    }
+    var fresh = std.mem.tokenizeScalar(u8, list_data.slice(), '\n');
+    while (fresh.next()) |path| {
+        if (path.len == 0) continue;
+        try out.print(allocator, "{s}\t{s}\n", .{ pkg, path });
+    }
+    const tmp_path = "/var/zp/installed/files.db.tmp";
+    const tmp_file = try Dir.createFileAbsolute(init.io, tmp_path, .{ .truncate = true });
+    defer tmp_file.close(init.io);
+    const st = try tmp_file.stat(init.io);
+    _ = try tmp_file.writePositionalAll(init.io, out.items, st.size);
+
+    try Dir.renameAbsolute(tmp_path, "/var/zp/installed/files.db", init.io);
+}
+
+pub fn checkConflicts(pkg: []const u8, path: []const u8, allocator: std.mem.Allocator) !?ErrorConflict {
+    var file = try zsys.File.openFile("/var/zp/installed/files.db", .{ .type = .read, .create = true });
+    defer file.close();
+
+    var reader = try file.readMmap();
+    defer reader.deinit();
+
+    var data = std.mem.tokenizeScalar(u8, reader.slice(), '\n');
+    while (data.next()) |line| {
+        var tokens = std.mem.tokenizeScalar(u8, line, ' ');
+        const name = tokens.next() orelse continue;
+        const path_file = tokens.next() orelse continue;
+
+        if (std.mem.eql(u8, path, path_file)) {
+            if (!std.mem.eql(u8, pkg, name)) {
+                return .{ .name = try allocator.dupe(u8, name), .path = try allocator.dupe(u8, path_file), .err = e.Conflict };
+            }
+        }
+    }
+    return null;
+}
 
 pub fn checkHex(src: []const u8, expected_hash: []const u8, allocator: std.mem.Allocator) !bool {
     var hasher = Sha256.init(.{});
@@ -59,46 +119,51 @@ pub fn createDirPath(io: anytype, base_dir: Dir, path: []const u8) !void {
     }
 }
 
-pub fn copy(io: anytype, allocator: std.mem.Allocator, src_dir: Dir, dest_dir: Dir, dest_path_prefix: []const u8, list_file: std.Io.File) !void {
+pub fn copy(io: anytype, allocator: std.mem.Allocator, src_dir: Dir, dest_dir: Dir, dest_path_prefix: []const u8, list_file: std.Io.File, pkg: []const u8) !void {
     var walker = try src_dir.walk(allocator);
     defer walker.deinit();
 
     var write_pos: u64 = 0;
     while (try walker.next(io)) |entry| {
-        var dest_path_buf: [8096]u8 = undefined;
         const dest_path = if (dest_path_prefix.len == 0 or std.mem.eql(u8, dest_path_prefix, "."))
             entry.path
         else
-            try std.fmt.bufPrint(&dest_path_buf, "{s}/{s}", .{ dest_path_prefix, entry.path });
+            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dest_path_prefix, entry.path });
+
+        const abs_path = try std.fmt.allocPrint(allocator, "/{s}", .{dest_path});
 
         switch (entry.kind) {
             .file => {
+                if (try checkConflicts(pkg, abs_path, allocator)) |c| {
+                    std.debug.print("Path conflict found at {s} (package {s}); Resolve it yourself to continue the installation process.\n", .{ c.path, c.name });
+                    return error.Conflict;
+                }
                 try entry.dir.copyFile(entry.basename, dest_dir, dest_path, io, .{});
-                var abs_path_buf: [4096]u8 = undefined;
-                const abs_path = try std.fmt.bufPrint(&abs_path_buf, "/{s}\n", .{dest_path});
-                _ = try list_file.writePositionalAll(io, abs_path, write_pos);
-                write_pos += abs_path.len;
+
+                const line = try std.fmt.allocPrint(allocator, "{s}\n", .{abs_path});
+                _ = try list_file.writePositionalAll(io, line, write_pos);
+                write_pos += line.len;
             },
             .directory => try createDirPath(io, dest_dir, dest_path),
             .sym_link => {
                 var target_buf: [4096]u8 = undefined;
                 const len = try entry.dir.readLink(io, entry.basename, &target_buf);
-                const target = target_buf[0..len];
 
-                dest_dir.deleteFile(io, dest_path) catch {}; // если ссылка уже есть
-                try dest_dir.symLink(io, target, dest_path, .{});
-                try record(io, list_file, &write_pos, dest_path);
+                if (try checkConflicts(pkg, abs_path, allocator)) |c| {
+                    std.debug.print("Path conflict found at {s} (package {s}); Resolve it yourself to continue the installation process.\n", .{ c.path, c.name });
+                    return error.Conflict;
+                }
+
+                dest_dir.deleteFile(io, dest_path) catch {};
+                try dest_dir.symLink(io, target_buf[0..len], dest_path, .{});
+
+                const line = try std.fmt.allocPrint(allocator, "{s}\n", .{abs_path});
+                _ = try list_file.writePositionalAll(io, line, write_pos);
+                write_pos += line.len;
             },
             else => continue,
         }
     }
-}
-
-fn record(io: anytype, list_file: std.Io.File, write_pos: *u64, dest_path: []const u8) !void {
-    var buf: [4096]u8 = undefined;
-    const line = try std.fmt.bufPrint(&buf, "/{s}\n", .{dest_path});
-    _ = try list_file.writePositionalAll(io, line, write_pos.*);
-    write_pos.* += line.len;
 }
 
 pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator) !void {
@@ -187,12 +252,13 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     const list_file = try Dir.createFileAbsolute(init.io, list_path, .{ .truncate = true });
     defer list_file.close(init.io);
 
-    try copy(init.io, allocator, pkg_dir, root_dir, "", list_file);
+    try copy(init.io, allocator, pkg_dir, root_dir, "", list_file, pkg_item);
     var cmd: [4096]u8 = undefined;
     try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item, &cmd);
 
     var buffer: [4096]u8 = undefined;
     try writeFile(init, "/var/zp/install/packages.db", pkg_item, pkg.version, &buffer);
+    try writeFileDb(init, list_path, pkg_item, allocator);
 }
 
 pub fn writeFile(init: std.process.Init, file: []const u8, pkg: []const u8, version: []const u8, buffer: []u8) !void {

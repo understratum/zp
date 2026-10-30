@@ -1,6 +1,7 @@
 const std = @import("std");
 const Dir = std.Io.Dir;
 const runProcess = @import("add.zig").runProcess;
+const zsys = @import("../libs/zsys/zsys.zig");
 
 pub fn createDirectories(io: anytype, root: []const u8) !void {
     var path_buf: [256]u8 = undefined;
@@ -36,6 +37,10 @@ pub fn init(io: anytype) !void {
     std.debug.print("Initializing zp...\n", .{});
 
     try createDirectories(io, "/var/zp");
+    var files_db = try zsys.File.openFile("/var/zp/installed/files.db", .{ .create = true });
+    defer files_db.close();
+    var packagesdb = try zsys.File.openFile("/var/zp/install/packages.db", .{ .create = true });
+    defer packagesdb.close();
 
     const REPO_URL: []const u8 = "https://github.com/understratum/zp-repo.git";
     const repo_path = "/var/zp/mirrors/zp-repo";

@@ -1,6 +1,65 @@
 const std = @import("std");
 const linux = std.os.linux;
 
+pub const ZsysError = error{
+    FileNotFound,
+    PermissionDenied,
+    IsDirectory,
+    NotDirectory,
+    FileExists,
+    PathTooLong,
+    NoSpaceLeft,
+    ReadOnlyFilesystem,
+    OpenFailed,
+    ReadFailed,
+    WriteFailed,
+    MmapFailed,
+    LockFailed,
+    SyncFailed,
+    DeleteFileFailed,
+    MkdirFailed,
+    StatxFailed,
+    OutOfMemory,
+    Busy,
+    InvalidArgument,
+    Interrupted,
+    IoError,
+    TooManyOpenFiles,
+    Unknown,
+};
+
+fn errnoToError(errno: linux.E) ZsysError {
+    return switch (errno) {
+        .SUCCESS => unreachable,
+        .NOENT => error.FileNotFound,
+        .ACCES => error.PermissionDenied,
+        .ISDIR => error.IsDirectory,
+        .NOTDIR => error.NotDirectory,
+        .EXIST => error.FileExists,
+        .NAMETOOLONG => error.PathTooLong,
+        .NOSPC => error.NoSpaceLeft,
+        .ROFS => error.ReadOnlyFilesystem,
+        .LOOP => error.FileNotFound,
+        .NOMEM => error.OutOfMemory,
+        .MFILE => error.TooManyOpenFiles,
+        .NFILE => error.TooManyOpenFiles,
+        .BUSY => error.Busy,
+        .INVAL => error.InvalidArgument,
+        .INTR => error.Interrupted,
+        .IO => error.IoError,
+        .XDEV => error.InvalidArgument,
+        else => error.Unknown,
+    };
+}
+
+inline fn syscallOrError(result: usize, context: []const u8) !void {
+    if (linux.errno(result) != .SUCCESS) {
+        const err = errnoToError(linux.errno(result));
+        std.debug.print("{s}: {any}\n", .{ context, err });
+        return err;
+    }
+}
+
 pub const DirOptions = struct { type: enum { read, write, read_write }, iterate: bool = false, no_follow: bool = false, cloexec: bool = true, exclusive: bool = false, create: bool = false, mode: u32 = 0o755 };
 
 const EntryKind = enum {
@@ -38,7 +97,13 @@ pub const Iterator = struct {
                 return null;
             }
 
-            self.len = bytes_read;
+            if (linux.errno(bytes_read) != .SUCCESS) {
+                const err = errnoToError(linux.errno(bytes_read));
+                std.debug.print("Iterator.next getdents64: {any}\n", .{err});
+                return err;
+            }
+
+            self.len = @intCast(bytes_read);
             self.offset = 0;
         }
 
@@ -97,9 +162,7 @@ pub const Dir = struct {
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{path}, 0);
 
         var O = linux.O{};
-
         O.ACCMODE = .RDONLY;
-
         O.CREAT = options.create;
         O.CLOEXEC = options.cloexec;
         O.NOFOLLOW = options.no_follow;
@@ -107,28 +170,31 @@ pub const Dir = struct {
         O.DIRECTORY = true;
 
         if (options.create) {
-            _ = linux.mkdir(buf, options.mode);
+            const mkdir_result = linux.mkdir(buf, options.mode);
+            if (linux.errno(mkdir_result) != .SUCCESS and linux.errno(mkdir_result) != .EXIST) {
+                return errnoToError(linux.errno(mkdir_result));
+            }
         }
 
-        const fd = linux.open(buf, O, options.mode);
+        const fd = linux.openat(linux.AT.FDCWD, buf, O, options.mode);
         if (linux.errno(fd) != .SUCCESS) {
-            return error.OpenFailed;
+            const err = errnoToError(linux.errno(fd));
+            std.debug.print("Dir.open({s}): {any}\n", .{ path, err });
+            return err;
         }
 
-        const fd_i32: i32 = @intCast(fd);
-
-        return .{ .fd = fd_i32 };
+        return .{ .fd = @intCast(fd) };
     }
-
     pub fn createDir(self: *Dir, name: []const u8, mode: u32) !Dir {
         var path_buf: [4096:0]u8 = undefined;
         if (name.len > path_buf.len) return error.PathTooLong;
-        const buf = try std.fmt.bufPrintSentinel(&path_buf, name, .{}, 0);
+        const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
 
         const result = linux.mkdirat(self.fd, buf, mode);
-
         if (linux.errno(result) != .SUCCESS) {
-            return error.MkdirFailed;
+            const err = errnoToError(linux.errno(result));
+            std.debug.print("Dir.createDir({s}): {any}\n", .{ name, err });
+            return err;
         }
 
         return .{ .fd = @intCast(result) };
@@ -137,7 +203,7 @@ pub const Dir = struct {
     pub fn deleteFile(self: *Dir, name: []const u8) !void {
         var path_buf: [4096:0]u8 = undefined;
         if (name.len > path_buf.len) return error.PathTooLong;
-        const buf = try std.fmt.bufPrintSentinel(&path_buf, name, .{}, 0);
+        const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
 
         const result = linux.unlinkat(self.fd, buf);
 
@@ -146,7 +212,7 @@ pub const Dir = struct {
         }
     }
 
-    pub fn deleteFilePath(path: []const u8) !void {
+    pub fn deletePath(path: []const u8) !void {
         var path_buf: [4096:0]u8 = undefined;
         if (path.len > path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, path, .{}, 0);
@@ -161,18 +227,18 @@ pub const Dir = struct {
     pub fn openDir(self: *Dir, name: []const u8) !Dir {
         var path_buf: [256:0]u8 = undefined;
         if (name.len > path_buf.len) return error.PathTooLong;
-        const buf = try std.fmt.bufPrintSentinel(&path_buf, name, .{}, 0);
+        const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
 
         var O = linux.O{};
-
         O.ACCMODE = .RDONLY;
         O.DIRECTORY = true;
         O.CLOEXEC = true;
 
         const fd = linux.openat(self.fd, buf, O, 0);
-
         if (linux.errno(fd) != .SUCCESS) {
-            return error.OpenFailed;
+            const err = errnoToError(linux.errno(fd));
+            std.debug.print("Dir.openDir({s}): {any}\n", .{ name, err });
+            return err;
         }
 
         return .{ .fd = @intCast(fd) };
@@ -202,7 +268,6 @@ pub const Dir = struct {
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{path}, 0);
 
         var O = linux.O{};
-
         if (options.type == .read_write) {
             O.ACCMODE = .RDWR;
         } else if (options.type == .write) {
@@ -211,7 +276,7 @@ pub const Dir = struct {
             O.ACCMODE = .RDONLY;
         }
 
-        O.CREAT = true;
+        O.CREAT = options.create;
         O.EXCL = options.excl;
         O.TRUNC = options.trunc;
         O.APPEND = options.append;
@@ -221,7 +286,9 @@ pub const Dir = struct {
 
         const fd: usize = linux.openat(self.fd, buf, O, options.mode);
         if (linux.errno(fd) != .SUCCESS) {
-            return error.OpenFailed;
+            const err = errnoToError(linux.errno(fd));
+            std.debug.print("Dir.openFile({s}): {any}\n", .{ path, err });
+            return err;
         }
 
         const fd_i32: i32 = @intCast(fd);
@@ -235,7 +302,10 @@ pub const Dir = struct {
 
             const result = linux.flock(fd_i32, lock_type);
             if (linux.errno(result) != .SUCCESS) {
-                return error.LockFailed;
+                const err = errnoToError(linux.errno(result));
+                std.debug.print("Dir.openFile({s}) lock: {any}\n", .{ path, err });
+                _ = linux.close(fd_i32);
+                return err;
             }
 
             return .{ .fd = fd_i32, .is_locked = true };
@@ -276,7 +346,6 @@ pub const File = struct {
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{path}, 0);
 
         var O = linux.O{};
-
         if (options.type == .read_write) {
             O.ACCMODE = .RDWR;
         } else if (options.type == .write) {
@@ -285,7 +354,7 @@ pub const File = struct {
             O.ACCMODE = .RDONLY;
         }
 
-        O.CREAT = true;
+        O.CREAT = options.create;
         O.EXCL = options.excl;
         O.TRUNC = options.trunc;
         O.APPEND = options.append;
@@ -295,7 +364,9 @@ pub const File = struct {
 
         const fd: usize = linux.open(buf, O, options.mode);
         if (linux.errno(fd) != .SUCCESS) {
-            return error.OpenFailed;
+            const err = errnoToError(linux.errno(fd));
+            std.debug.print("File.openFile({s}): {any}\n", .{ path, err });
+            return err;
         }
 
         const fd_i32: i32 = @intCast(fd);
@@ -309,7 +380,10 @@ pub const File = struct {
 
             const result = linux.flock(fd_i32, lock_type);
             if (linux.errno(result) != .SUCCESS) {
-                return error.LockFailed;
+                const err = errnoToError(linux.errno(result));
+                std.debug.print("File.openFile({s}) lock: {any}\n", .{ path, err });
+                _ = linux.close(fd_i32);
+                return err;
             }
 
             return .{ .fd = fd_i32, .is_locked = true };
@@ -336,9 +410,6 @@ pub const File = struct {
         }
 
         const file_size: usize = @intCast(statx.size);
-        if (file_size == 0) {
-            return "";
-        }
 
         const buffer = try allocator.alloc(u8, file_size);
         errdefer allocator.free(buffer);
@@ -370,9 +441,10 @@ pub const File = struct {
         var statx: linux.Statx = undefined;
 
         const statx_result = linux.statx(self.fd, "", linux.AT.EMPTY_PATH, linux.STATX{ .SIZE = true }, &statx);
-
         if (linux.errno(statx_result) != .SUCCESS) {
-            return error.StatxFailed;
+            const err = errnoToError(linux.errno(statx_result));
+            std.debug.print("readMmap statx: {any}\n", .{err});
+            return err;
         }
 
         const file_size: usize = @intCast(statx.size);
@@ -382,7 +454,9 @@ pub const File = struct {
 
         const mmap_result = linux.mmap(null, file_size, linux.PROT{ .READ = true }, linux.MAP{ .TYPE = .PRIVATE }, self.fd, 0);
         if (linux.errno(mmap_result) != .SUCCESS) {
-            return error.MmapFailed;
+            const err = errnoToError(linux.errno(mmap_result));
+            std.debug.print("readMmap mmap (size={d}): {any}\n", .{ file_size, err });
+            return err;
         }
 
         return .{ .ptr = @ptrFromInt(mmap_result), .len = file_size };
@@ -476,7 +550,7 @@ pub const File = struct {
 
         var buffer = try allocator.alloc(u8, file_size);
 
-        const data = linux.pread(self.fd, &buffer.ptr, &buffer.len, offset);
+        const data = linux.pread(self.fd, buffer.ptr, buffer.len, offset);
 
         if (linux.errno(data) != .SUCCESS) {
             return error.ReadError;
