@@ -253,8 +253,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     defer list_file.close(init.io);
 
     try copy(init.io, allocator, pkg_dir, root_dir, "", list_file, pkg_item);
-    var cmd: [4096]u8 = undefined;
-    try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item, &cmd);
+    try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item);
 
     var buffer: [4096]u8 = undefined;
     try writeFile(init, "/var/zp/install/packages.db", pkg_item, pkg.version, &buffer);
@@ -262,48 +261,35 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
 }
 
 pub fn writeFile(init: std.process.Init, file: []const u8, pkg: []const u8, version: []const u8, buffer: []u8) !void {
-    try removePkgEntry(init, file, pkg, buffer);
+    try removePkgEntry(init, file, pkg);
     const clean_version = std.mem.trim(u8, version, "\n\r ");
-    const open_file = Dir.openFileAbsolute(init.io, file, .{ .mode = .read_write }) catch |err| {
-        if (err == error.FileNotFound) {
-            const new_file = try Dir.createFileAbsolute(init.io, file, .{});
-            defer new_file.close(init.io);
-            const name_version = try std.fmt.bufPrint(buffer, "{s} {s}\n", .{ pkg, clean_version });
-            const stat = try new_file.stat(init.io);
-            const size = stat.size;
-            _ = try new_file.writePositionalAll(init.io, name_version, size);
-            return;
-        }
-        return err;
-    };
-    defer open_file.close(init.io);
+    var open_file = try zsys.File.openFile(file, .{ .append = true, .create = true, .type = .read_write, .lock = .exclusive });
+    defer open_file.close();
 
-    const stat = try open_file.stat(init.io);
-    const file_size = stat.size;
     const name_version = try std.fmt.bufPrint(buffer, "{s} {s}\n", .{ pkg, clean_version });
-    _ = try open_file.writePositionalAll(init.io, name_version, file_size);
+    try open_file.writeFile(name_version);
 }
 
-pub fn removePkgEntry(init: std.process.Init, file: []const u8, pkg: []const u8, buffer: []u8) !void {
-    const open_file = Dir.openFileAbsolute(init.io, file, .{}) catch return;
-    defer open_file.close(init.io);
+pub fn removePkgEntry(init: std.process.Init, file: []const u8, pkg: []const u8) !void {
+    var open_file = zsys.File.openFile(file, .{ .type = .read_write, .lock = .exclusive }) catch return;
+    defer open_file.close();
 
-    var reader = open_file.reader(init.io, buffer);
+    var reader = try open_file.readMmap();
+    defer reader.deinit();
     const tmp_path = "/var/zp/install/packages.db.tmp";
-    const tmp_file = try Dir.createFileAbsolute(init.io, tmp_path, .{});
-    defer tmp_file.close(init.io);
+    var tmp_file = try zsys.File.openFile(tmp_path, .{ .create = true, .type = .read_write });
+    defer tmp_file.close();
+    var data = std.mem.tokenizeScalar(u8, reader.slice(), '\n');
 
-    while (try reader.interface.takeDelimiter('\n')) |line| {
+    while (data.next()) |line| {
         if (line.len == 0) continue;
         var tokens = std.mem.tokenizeScalar(u8, line, ' ');
         const name = tokens.next() orelse continue;
         if (std.mem.eql(u8, name, pkg)) continue;
 
-        var line_buf: [4096]u8 = undefined;
+        var line_buf: [168]u8 = undefined;
         const line_with_newline = try std.fmt.bufPrint(&line_buf, "{s}\n", .{line});
-        const stat_file = try tmp_file.stat(init.io);
-        const size = stat_file.size;
-        _ = try tmp_file.writePositionalAll(init.io, line_with_newline, size);
+        _ = try tmp_file.writeFile(line_with_newline);
     }
 
     try Dir.renameAbsolute(tmp_path, file, init.io);

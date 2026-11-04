@@ -55,8 +55,7 @@ pub fn remove(init: std.process.Init, pkg_item: []const u8) !void {
 
     try removeEmptyDirs(init.io, allocator, file_paths, root_dir);
     try cwd.deleteFile(init.io, list_path);
-    var cmd_buf: [4096]u8 = undefined;
-    try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item, &cmd_buf);
+    try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item);
     try removePkgFromFilesDb(init, "/var/zp/installed/files.db", pkg_item);
     std.debug.print("Package '{s}' removed successfully\n", .{pkg_item});
 }
