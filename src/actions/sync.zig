@@ -24,7 +24,7 @@ pub fn createDirectories(io: anytype, root: []const u8) !void {
         };
     }
 
-    for ([_][]const u8{ "build", "install", "mirrors", "pkg" }) |part| {
+    for ([_][]const u8{ "build", "install", "mirrors", "pkg", "installed" }) |part| {
         const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ root, part });
         dir.createDir(io, path, .default_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
