@@ -8,6 +8,8 @@ Source-based package manager written in Zig.
 Fetch. Build. Install. From source; no prebuilt binaries.
 <img width="633" height="723" alt="Image" src="https://github.com/user-attachments/assets/8c19a91d-dfe1-4f06-aff9-68ed180a0369" />
 
+> **Selected as a reference implementation in the [XERJ Corpus Hub](https://hub.xerj.org/contributors/nevvixsz) for AI coding agents**, recognized for clean architecture and robust Zig implementation.
+
 ---
 
 ## Overview
