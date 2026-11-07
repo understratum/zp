@@ -2,49 +2,56 @@ const std = @import("std");
 const Dir = std.Io.Dir;
 const runProcess = @import("add.zig").runProcess;
 const zsys = @import("../libs/zsys/zsys.zig");
+const Config = @import("../libs/ConfigLib/config.zig").Config;
 
-pub fn createDirectories(io: anytype, root: []const u8) !void {
-    var path_buf: [256]u8 = undefined;
+fn ensureDir(io: anytype, path: []const u8) !void {
     const dir = Dir.cwd();
-
-    var path_len: usize = if (root[0] == '/') 1 else 0;
-    if (path_len == 1) path_buf[0] = '/';
-    var parts = std.mem.tokenizeScalar(u8, root, '/');
-    while (parts.next()) |part| {
-        if (path_len > 1) {
-            path_buf[path_len] = '/';
-            path_len += 1;
+    var buf: [4096]u8 = undefined;
+    var len: usize = if (path.len > 0 and path[0] == '/') 1 else 0;
+    if (len == 1) buf[0] = '/';
+    var it = std.mem.tokenizeScalar(u8, path, '/');
+    while (it.next()) |part| {
+        if (len > 1) {
+            if (len + 1 + part.len > buf.len) return error.NameTooLong;
+            buf[len] = '/';
+            len += 1;
+        } else if (part.len > buf.len) {
+            return error.NameTooLong;
         }
-        @memcpy(path_buf[path_len..][0..part.len], part);
-        path_len += part.len;
-        const path = path_buf[0..path_len];
-        dir.createDir(io, path, .default_dir) catch |err| switch (err) {
-            error.PathAlreadyExists => {},
-            else => return err,
-        };
-    }
+        @memcpy(buf[len..][0..part.len], part);
+        len += part.len;
 
-    for ([_][]const u8{ "build", "install", "mirrors", "pkg", "installed" }) |part| {
-        const path = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ root, part });
-        dir.createDir(io, path, .default_dir) catch |err| switch (err) {
+        dir.createDir(io, buf[0..len], .default_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {},
             else => return err,
         };
     }
 }
 
-pub fn init(io: anytype) !void {
+pub fn createDirectories(io: anytype, root: []const u8, config: Config) !void {
+    try ensureDir(io, root);
+    const subs = [_][]const u8{ config.build_dir, config.cache_dir, config.mirror_dir, config.pkg_dir, config.db_dir, "etc/zp" };
+    for (subs) |sub| {
+        try ensureDir(io, sub);
+    }
+}
+
+pub fn init(io: anytype, allocator: std.mem.Allocator, config: Config) !void {
+    try createDirectories(io, config.root, config);
+    var files_db = try zsys.File.openFile(try std.fmt.allocPrint(allocator, "{s}files.db", .{config.db_dir}), .{ .create = true });
+    defer files_db.close();
+    var packagesdb = try zsys.File.openFile(try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir}), .{ .create = true });
+    defer packagesdb.close();
+}
+
+pub fn sync(io: anytype, allocator: std.mem.Allocator, config: Config) !void {
     std.debug.print("Initializing zp...\n", .{});
 
-    try createDirectories(io, "/var/zp");
-    var files_db = try zsys.File.openFile("/var/zp/installed/files.db", .{ .create = true });
-    defer files_db.close();
-    var packagesdb = try zsys.File.openFile("/var/zp/install/packages.db", .{ .create = true });
-    defer packagesdb.close();
+    try init(io, allocator, config);
 
     const REPO_URL: []const u8 = "https://github.com/understratum/zp-repo.git";
-    const repo_path = "/var/zp/mirrors/zp-repo";
-    std.Io.Dir.accessAbsolute(io, "/var/zp/mirrors/zp-repo", .{}) catch |err| switch (err) {
+    const repo_path = try std.fmt.allocPrint(allocator, "{s}zp-repo", .{config.mirror_dir});
+    std.Io.Dir.accessAbsolute(io, repo_path, .{}) catch |err| switch (err) {
         error.FileNotFound => {
             const argv = [_][]const u8{ "git", "clone", "--depth", "1", REPO_URL, repo_path };
             try runProcess(io, &argv, ".");

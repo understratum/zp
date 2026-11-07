@@ -3,12 +3,13 @@ const p = @import("../parser.zig");
 const a = @import("add.zig");
 const linux = std.os.linux;
 const zsys = @import("../libs/zsys/zsys.zig");
+const Config = @import("../libs/ConfigLib/config.zig").Config;
 
-pub fn updatePkg(init: std.process.Init, pkg_name: []const u8, allocator: std.mem.Allocator) !void {
-    const installed = try p.GetPkgsStatInstalled(pkg_name, allocator);
+pub fn updatePkg(init: std.process.Init, pkg_name: []const u8, allocator: std.mem.Allocator, config: Config) !void {
+    const installed = try p.GetPkgsStatInstalled(pkg_name, allocator, config);
 
     if (installed.version) |iv| {
-        const pkg = try p.GetPkgStatToInstall(pkg_name, allocator);
+        const pkg = try p.GetPkgStatToInstall(pkg_name, allocator, config);
 
         defer {
             allocator.free(pkg.name);
@@ -18,7 +19,7 @@ pub fn updatePkg(init: std.process.Init, pkg_name: []const u8, allocator: std.me
 
         if (!std.mem.eql(u8, iv, pkg.version)) {
             std.log.info("Updating {s}: {s} → {s}\n", .{ pkg_name, iv, pkg.version });
-            try a.add(init, pkg_name, allocator);
+            try a.add(init, pkg_name, allocator, config);
         } else {
             std.debug.print("{s} is up to date ({s})\n", .{ pkg_name, iv });
         }
@@ -27,8 +28,8 @@ pub fn updatePkg(init: std.process.Init, pkg_name: []const u8, allocator: std.me
     }
 }
 
-pub fn updateAll(init: std.process.Init) !void {
-    var fd = try zsys.File.openFile("/var/zp/install/packages.db", .{ .type = .read });
+pub fn updateAll(init: std.process.Init, config: Config) !void {
+    var fd = try zsys.File.openFile(try std.fmt.allocPrint(init.arena.allocator(), "{s}packages.db", .{config.db_dir}), .{ .type = .read });
     defer fd.close();
 
     const content = try fd.read(init.arena.allocator());
@@ -37,7 +38,7 @@ pub fn updateAll(init: std.process.Init) !void {
     while (reader.next()) |line| {
         var tokens = std.mem.tokenizeScalar(u8, line, ' ');
         const name = tokens.next() orelse continue;
-        try updatePkg(init, name, init.arena.allocator());
+        try updatePkg(init, name, init.arena.allocator(), config);
     }
 }
 

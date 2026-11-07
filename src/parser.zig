@@ -4,6 +4,7 @@ const Dir = std.Io.Dir;
 const linux = std.os.linux;
 const zsys = @import("libs/zsys/zsys.zig");
 const Pkg = @import("types.zig").Pkg;
+const Config = @import("libs/ConfigLib/config.zig").Config;
 
 pub const PkgStat = struct { name: []const u8, version: ?[]const u8 };
 
@@ -13,8 +14,8 @@ pub fn parsePkg(allocator: std.mem.Allocator, src: [:0]const u8) !Pkg {
     return try std.zon.parse.fromSlice(Pkg, .{ .gpa = allocator, .arena = allocator, .source = src, .ignore_unknown_fields = true, .diagnostics = &diag });
 }
 
-pub fn GetPkgStatToInstall(pkg: []const u8, allocator: std.mem.Allocator) !Pkg {
-    const buf = try std.fmt.allocPrint(allocator, "/var/zp/mirrors/zp-repo/pkgs/{s}/{s}.zon", .{ pkg, pkg });
+pub fn GetPkgStatToInstall(pkg: []const u8, allocator: std.mem.Allocator, config: Config) !Pkg {
+    const buf = try std.fmt.allocPrint(allocator, "{s}zp-repo/pkgs/{s}/{s}.zon", .{ config.mirror_dir, pkg, pkg });
     defer allocator.free(buf);
 
     var file = try zsys.File.openFile(buf, .{ .type = .read });
@@ -30,8 +31,10 @@ pub fn GetPkgStatToInstall(pkg: []const u8, allocator: std.mem.Allocator) !Pkg {
     return e.PkgNotFound;
 }
 
-pub fn getInstalledVersion(pkg: []const u8, allocator: std.mem.Allocator) !?[]const u8 {
-    var file = try zsys.File.openFile("/var/zp/install/packages.db", .{ .type = .read, .create = true });
+pub fn getInstalledVersion(pkg: []const u8, allocator: std.mem.Allocator, config: Config) !?[]const u8 {
+    const buf = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
+    defer allocator.free(buf);
+    var file = try zsys.File.openFile(buf, .{ .type = .read, .create = true });
     defer file.close();
     const data = try file.read(allocator);
 
@@ -46,8 +49,10 @@ pub fn getInstalledVersion(pkg: []const u8, allocator: std.mem.Allocator) !?[]co
     return null;
 }
 
-pub fn GetPkgsStatInstalled(pkg: []const u8, allocator: std.mem.Allocator) !PkgStat {
-    var fd = try zsys.File.openFile("/var/zp/install/packages.db", .{ .type = .read, .create = true });
+pub fn GetPkgsStatInstalled(pkg: []const u8, allocator: std.mem.Allocator, config: Config) !PkgStat {
+    const buf = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
+    defer allocator.free(buf);
+    var fd = try zsys.File.openFile(buf, .{ .type = .read, .create = true });
     defer fd.close();
 
     const data = try fd.read(allocator);
@@ -64,8 +69,10 @@ pub fn GetPkgsStatInstalled(pkg: []const u8, allocator: std.mem.Allocator) !PkgS
     return e.PkgNotFound;
 }
 
-pub fn GetInstalledPkgs(allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-    var file = try zsys.File.openFile("/var/zp/install/packages.db", .{ .type = .read, .create = true });
+pub fn GetInstalledPkgs(allocator: std.mem.Allocator, config: Config) !std.ArrayList([]const u8) {
+    const buf = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
+    defer allocator.free(buf);
+    var file = try zsys.File.openFile(buf, .{ .type = .read, .create = true });
     defer file.close();
 
     const data = try file.read(allocator);

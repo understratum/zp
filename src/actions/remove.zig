@@ -1,7 +1,8 @@
 const std = @import("std");
 const zsys = @import("../libs/zsys/zsys.zig");
 const runProcess = @import("add.zig").runProcess;
-const removePkgEntry = @import("add.zig").removePkgEntry;
+const removePkgEntry = @import("__removePkgEntry.zig").removePkgEntry;
+const Config = @import("../libs/ConfigLib/config.zig").Config;
 
 const DB_SEP = '\t';
 fn dbPkg(line: []const u8) ?[]const u8 {
@@ -14,9 +15,9 @@ fn dbPath(line: []const u8) ?[]const u8 {
     return line[i + 1 ..];
 }
 
-pub fn remove(init: std.process.Init, pkg_item: []const u8) !void {
+pub fn remove(init: std.process.Init, pkg_item: []const u8, config: Config) !void {
     var list_path_buf: [256]u8 = undefined;
-    const list_path = try std.fmt.bufPrint(&list_path_buf, "/var/zp/installed/{s}.list", .{pkg_item});
+    const list_path = try std.fmt.bufPrint(&list_path_buf, "{s}{s}.list", .{ config.db_dir, pkg_item });
     const cwd = std.Io.Dir.cwd();
     const allocator = init.arena.allocator();
     const list_file = cwd.openFile(init.io, list_path, .{}) catch |err| {
@@ -46,6 +47,10 @@ pub fn remove(init: std.process.Init, pkg_item: []const u8) !void {
         root_dir.deleteFile(init.io, rel_path) catch |err| switch (err) {
             error.FileNotFound => continue,
             error.IsDir => continue,
+            error.AccessDenied => {
+                std.log.err("Not enough permissions. Try 'sudo zp remove {s}'", .{pkg_item});
+                return error.AccessDenied;
+            },
             else => {
                 std.debug.print("Failed to remove {s}: {}\n", .{ rel_path, err });
                 continue;
@@ -55,8 +60,8 @@ pub fn remove(init: std.process.Init, pkg_item: []const u8) !void {
 
     try removeEmptyDirs(init.io, allocator, file_paths, root_dir);
     try cwd.deleteFile(init.io, list_path);
-    try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item);
-    try removePkgFromFilesDb(init, "/var/zp/installed/files.db", pkg_item);
+    try removePkgEntry(init, try std.fmt.allocPrint(init.arena.allocator(), "{s}packages.db", .{config.db_dir}), pkg_item, config);
+    try removePkgFromFilesDb(init, try std.fmt.allocPrint(init.arena.allocator(), "{s}files.db", .{config.db_dir}), pkg_item, config);
     std.debug.print("Package '{s}' removed successfully\n", .{pkg_item});
 }
 
@@ -100,17 +105,15 @@ pub fn removeEmptyDirs(io: anytype, allocator: std.mem.Allocator, file_paths: st
     }
 }
 
-fn removePkgFromFilesDb(init: std.process.Init, file: []const u8, pkg: []const u8) !void {
+fn removePkgFromFilesDb(init: std.process.Init, file: []const u8, pkg: []const u8, config: Config) !void {
     var file_ = try zsys.File.openFile(file, .{ .type = .read, .create = true });
     defer file_.close();
-
     var db = try file_.readMmap();
     defer db.deinit();
 
-    const tmp_path = "/var/zp/installed/files.db.tmp";
+    const tmp_path = try std.fmt.allocPrint(init.arena.allocator(), "{s}files.db.tmp", .{config.db_dir});
     const tmp_file = try std.Io.Dir.createFileAbsolute(init.io, tmp_path, .{ .truncate = true });
     defer tmp_file.close(init.io);
-
     var kept: usize = 0;
     var dropped: usize = 0;
     var pos: u64 = 0;
@@ -118,18 +121,14 @@ fn removePkgFromFilesDb(init: std.process.Init, file: []const u8, pkg: []const u
     var it = std.mem.tokenizeScalar(u8, db.slice(), '\n');
     while (it.next()) |line| {
         if (line.len == 0) continue;
-
         const name = dbPkg(line) orelse {
-            std.log.warn("files.db: строка без разделителя, оставляю: {s}", .{line});
             kept += 1;
             continue;
         };
-
         if (std.mem.eql(u8, name, pkg)) {
             dropped += 1;
             continue;
         }
-
         var line_buf: [4096]u8 = undefined;
         const out_line = try std.fmt.bufPrint(&line_buf, "{s}\n", .{line});
         _ = try tmp_file.writePositionalAll(init.io, out_line, pos);

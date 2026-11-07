@@ -4,46 +4,40 @@ const e = @import("../types.zig").Error;
 const Dir = std.Io.Dir;
 const zsys = @import("../libs/zsys/zsys.zig");
 const Sha256 = std.crypto.hash.sha2.Sha256;
+const Config = @import("../libs/ConfigLib/config.zig").Config;
 
 pub const ErrorConflict = struct { name: []const u8, path: []const u8, err: ?e = null };
 
-pub fn writeFileDb(init: std.process.Init, list_path: []const u8, pkg: []const u8, allocator: std.mem.Allocator) !void {
-    var list_file = try zsys.File.openFile(list_path, .{ .type = .read });
-    defer list_file.close();
+pub fn buildSpawnArgv(allocator: std.mem.Allocator, config: Config, name: []const u8, script_path: []const u8) ![]const []const u8 {
+    const src_dir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.build_dir, name });
+    const destdir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.pkg_dir, name });
+    const jobs = try std.fmt.allocPrint(allocator, "{d}", .{config.jobs});
 
-    var list_data = try list_file.readMmap();
-    defer list_data.deinit();
-    var db_file = try zsys.File.openFile("/var/zp/installed/files.db", .{ .type = .read, .create = true });
-    defer db_file.close();
-    var db_data = try db_file.readMmap();
-    defer db_data.deinit();
+    var list: std.ArrayList([]const u8) = .empty;
+    try list.append(allocator, "env");
 
-    var out: std.ArrayList(u8) = .empty;
-    defer out.deinit(allocator);
-    var old = std.mem.tokenizeScalar(u8, db_data.slice(), '\n');
-    while (old.next()) |line| {
-        if (line.len == 0) continue;
-        const tab = std.mem.indexOfScalar(u8, line, '\t') orelse continue;
-        if (std.mem.eql(u8, line[0..tab], pkg)) continue;
-        try out.appendSlice(allocator, line);
-        try out.append(allocator, '\n');
+    const pairs = [_]struct { k: []const u8, v: []const u8 }{
+        .{ .k = "ZP_ROOT", .v = config.root },
+        .{ .k = "ZP_SRC_DIR", .v = src_dir },
+        .{ .k = "ZP_DESTDIR", .v = destdir },
+        .{ .k = "ZP_BUILD_DIR", .v = try std.fmt.allocPrint(allocator, "{s}", .{config.build_dir}) },
+        .{ .k = "ZP_PKG_DIR", .v = try std.fmt.allocPrint(allocator, "{s}", .{config.pkg_dir}) },
+        .{ .k = "ZP_CACHE_DIR", .v = try std.fmt.allocPrint(allocator, "{s}", .{config.cache_dir}) },
+        .{ .k = "ZP_MIRROR_DIR", .v = try std.fmt.allocPrint(allocator, "{s}", .{config.mirror_dir}) },
+        .{ .k = "ZP_DB_DIR", .v = try std.fmt.allocPrint(allocator, "{s}", .{config.db_dir}) },
+        .{ .k = "ZP_JOBS", .v = jobs },
+    };
+    for (pairs) |part| {
+        try list.append(allocator, try std.fmt.allocPrint(allocator, "{s}={s}", .{ part.k, part.v }));
     }
-    var fresh = std.mem.tokenizeScalar(u8, list_data.slice(), '\n');
-    while (fresh.next()) |path| {
-        if (path.len == 0) continue;
-        try out.print(allocator, "{s}\t{s}\n", .{ pkg, path });
-    }
-    const tmp_path = "/var/zp/installed/files.db.tmp";
-    const tmp_file = try Dir.createFileAbsolute(init.io, tmp_path, .{ .truncate = true });
-    defer tmp_file.close(init.io);
-    const st = try tmp_file.stat(init.io);
-    _ = try tmp_file.writePositionalAll(init.io, out.items, st.size);
-
-    try Dir.renameAbsolute(tmp_path, "/var/zp/installed/files.db", init.io);
+    try list.append(allocator, "/bin/sh");
+    try list.append(allocator, script_path);
+    return list.items;
 }
 
-pub fn checkConflicts(pkg: []const u8, path: []const u8, allocator: std.mem.Allocator) !?ErrorConflict {
-    var file = try zsys.File.openFile("/var/zp/installed/files.db", .{ .type = .read, .create = true });
+pub fn checkConflicts(pkg: []const u8, path: []const u8, allocator: std.mem.Allocator, config: Config) !?ErrorConflict {
+    const buf = try std.fmt.allocPrint(allocator, "{s}files.db", .{config.db_dir});
+    var file = try zsys.File.openFile(buf, .{ .type = .read, .create = true });
     defer file.close();
 
     var reader = try file.readMmap();
@@ -119,60 +113,15 @@ pub fn createDirPath(io: anytype, base_dir: Dir, path: []const u8) !void {
     }
 }
 
-pub fn copy(io: anytype, allocator: std.mem.Allocator, src_dir: Dir, dest_dir: Dir, dest_path_prefix: []const u8, list_file: std.Io.File, pkg: []const u8) !void {
-    var walker = try src_dir.walk(allocator);
-    defer walker.deinit();
-
-    var write_pos: u64 = 0;
-    while (try walker.next(io)) |entry| {
-        const dest_path = if (dest_path_prefix.len == 0 or std.mem.eql(u8, dest_path_prefix, "."))
-            entry.path
-        else
-            try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dest_path_prefix, entry.path });
-
-        const abs_path = try std.fmt.allocPrint(allocator, "/{s}", .{dest_path});
-
-        switch (entry.kind) {
-            .file => {
-                if (try checkConflicts(pkg, abs_path, allocator)) |c| {
-                    std.debug.print("Path conflict found at {s} (package {s}); Resolve it yourself to continue the installation process.\n", .{ c.path, c.name });
-                    return error.Conflict;
-                }
-                try entry.dir.copyFile(entry.basename, dest_dir, dest_path, io, .{});
-
-                const line = try std.fmt.allocPrint(allocator, "{s}\n", .{abs_path});
-                _ = try list_file.writePositionalAll(io, line, write_pos);
-                write_pos += line.len;
-            },
-            .directory => try createDirPath(io, dest_dir, dest_path),
-            .sym_link => {
-                var target_buf: [4096]u8 = undefined;
-                const len = try entry.dir.readLink(io, entry.basename, &target_buf);
-
-                if (try checkConflicts(pkg, abs_path, allocator)) |c| {
-                    std.debug.print("Path conflict found at {s} (package {s}); Resolve it yourself to continue the installation process.\n", .{ c.path, c.name });
-                    return error.Conflict;
-                }
-
-                dest_dir.deleteFile(io, dest_path) catch {};
-                try dest_dir.symLink(io, target_buf[0..len], dest_path, .{});
-
-                const line = try std.fmt.allocPrint(allocator, "{s}\n", .{abs_path});
-                _ = try list_file.writePositionalAll(io, line, write_pos);
-                write_pos += line.len;
-            },
-            else => continue,
-        }
-    }
-}
-
-pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator) !void {
+pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator, config: Config) !void {
     const root = try Dir.openDirAbsolute(init.io, "/", .{});
     defer root.close(init.io);
-    const pkg = try p.GetPkgStatToInstall(pkg_item, allocator);
+    const packages_db = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
+    const cache_dir = try std.fmt.allocPrint(allocator, "{s}", .{config.cache_dir});
+    const pkg = try p.GetPkgStatToInstall(pkg_item, allocator, config);
     const file_name = if (std.mem.lastIndexOfScalar(u8, pkg.url, '/')) |i| pkg.url[i + 1 ..] else pkg.url;
 
-    const installedPkgs = try p.GetInstalledPkgs(allocator);
+    const installedPkgs = try p.GetInstalledPkgs(allocator, config);
 
     for (pkg.deps) |dep| {
         var found = false;
@@ -182,115 +131,77 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
                 break;
             }
         }
-        if (!found) try add(init, dep, allocator);
+        if (!found) try add(init, dep, allocator, config);
     }
 
     std.log.info("Installing tar file '{s}'...\n", .{pkg_item});
 
     const argv = [_][]const u8{ "curl", "-fSL", "-o", file_name, pkg.url };
-    try runProcess(init.io, &argv, "/var/zp/install/");
-    const path_buf: []const u8 = try std.fmt.allocPrint(allocator, "/var/zp/install/{s}", .{file_name});
+    try runProcess(init.io, &argv, cache_dir);
+    const path_buf: []const u8 = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.cache_dir, file_name });
 
-    const check = try checkHex(path_buf, pkg.hash, allocator);
-    if (!check) {
-        Dir.deleteFileAbsolute(init.io, path_buf) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => return err,
-        };
-        return error.InvalidHash;
+    if (config.verify_hash) {
+        const check = try checkHex(path_buf, pkg.hash, allocator);
+        if (!check) {
+            Dir.deleteFileAbsolute(init.io, path_buf) catch |err| switch (err) {
+                error.FileNotFound => {},
+                else => return err,
+            };
+            return error.InvalidHash;
+        } else {
+            std.log.info("hash check: successful\n", .{});
+        }
+    } else {
+        std.log.warn("Check hash: false. Continue...", .{});
     }
-
-    std.log.info("hash check: successful\n", .{});
 
     var tar_cmd_buf: [8096]u8 = undefined;
 
-    const build_dir = try std.fmt.allocPrint(allocator, "/var/zp/build/{s}", .{pkg_item});
+    const build_dir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.build_dir, pkg_item });
     try root.deleteTree(init.io, build_dir);
 
-    Dir.createDirAbsolute(init.io, try std.fmt.bufPrint(&tar_cmd_buf, "/var/zp/build/{s}", .{pkg_item}), .default_dir) catch |err| switch (err) {
+    Dir.createDirAbsolute(init.io, try std.fmt.bufPrint(&tar_cmd_buf, "{s}{s}", .{ config.build_dir, pkg_item }), .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
-    const tar_cmd = try std.fmt.bufPrint(&tar_cmd_buf, "tar -xf /var/zp/install/{s} -C /var/zp/build/{s} --strip-components=1", .{ file_name, pkg_item });
+    const tar_cmd = try std.fmt.bufPrint(&tar_cmd_buf, "tar -xf {s}{s} -C {s}{s} --strip-components=1", .{ config.cache_dir, file_name, config.build_dir, pkg_item });
     const argv_tar = [_][]const u8{ "sh", "-c", tar_cmd };
-    try runProcess(init.io, &argv_tar, "/var/zp/install/");
+    try runProcess(init.io, &argv_tar, cache_dir);
 
     var buff: [256]u8 = undefined;
-    const src = try std.fmt.bufPrint(&buff, "/var/zp/mirrors/zp-repo/pkgs/{s}/BuildFile", .{pkg_item});
+    const src = try std.fmt.bufPrint(&buff, "{s}/zp-repo/pkgs/{s}/BuildFile", .{ config.mirror_dir, pkg_item });
+    const argv_build = try buildSpawnArgv(allocator, config, pkg.name, src);
+    const src_dir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.build_dir, pkg.name });
     std.log.info("Installing '{s}'...\n", .{pkg_item});
-    const pkg_bin = try std.fmt.allocPrint(allocator, "/var/zp/pkg/{s}", .{pkg_item});
+    const pkg_bin = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.pkg_dir, pkg_item });
     defer allocator.free(pkg_bin);
     Dir.createDirAbsolute(init.io, pkg_bin, .default_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {},
         else => return err,
     };
-    runProcess(init.io, &[_][]const u8{ "sh", src }, ".") catch |err| switch (err) {
+    runProcess(init.io, argv_build, src_dir) catch |err| switch (err) {
         error.ProcessFailed => {
-            const massive = [_][]const u8{ path_buf, build_dir };
+            if (config.keep_build) {
+                const massive = [_][]const u8{ path_buf, build_dir };
 
-            inline for (massive) |item| {
-                try root.deleteTree(init.io, item);
+                inline for (massive) |item| {
+                    try root.deleteTree(init.io, item);
+                }
+                return err;
             }
+            return err;
         },
         else => return err,
     };
 
-    var pkg_dir = try Dir.openDirAbsolute(init.io, pkg_bin, .{ .iterate = true });
-    defer pkg_dir.close(init.io);
-
-    var root_dir = try Dir.openDirAbsolute(init.io, "/", .{});
-    defer root_dir.close(init.io);
-
     var list_path_buf: [256]u8 = undefined;
-    const list_path = try std.fmt.bufPrint(&list_path_buf, "/var/zp/installed/{s}.list", .{pkg_item});
+    const list_path = try std.fmt.bufPrint(&list_path_buf, "{s}{s}.list", .{ config.db_dir, pkg_item });
 
-    Dir.createDirAbsolute(init.io, "/var/zp/installed", .default_dir) catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => return err,
-    };
+    try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__copy", pkg_bin, "/", "", list_path, pkg_item }, ".");
 
-    const list_file = try Dir.createFileAbsolute(init.io, list_path, .{ .truncate = true });
-    defer list_file.close(init.io);
+    try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__removePkgEntry", packages_db, pkg_item }, ".");
 
-    try copy(init.io, allocator, pkg_dir, root_dir, "", list_file, pkg_item);
-    try removePkgEntry(init, "/var/zp/install/packages.db", pkg_item);
+    try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__writeFile", packages_db, pkg_item, pkg.version }, ".");
 
-    var buffer: [4096]u8 = undefined;
-    try writeFile(init, "/var/zp/install/packages.db", pkg_item, pkg.version, &buffer);
-    try writeFileDb(init, list_path, pkg_item, allocator);
-}
-
-pub fn writeFile(init: std.process.Init, file: []const u8, pkg: []const u8, version: []const u8, buffer: []u8) !void {
-    try removePkgEntry(init, file, pkg);
-    const clean_version = std.mem.trim(u8, version, "\n\r ");
-    var open_file = try zsys.File.openFile(file, .{ .append = true, .create = true, .type = .read_write, .lock = .exclusive });
-    defer open_file.close();
-
-    const name_version = try std.fmt.bufPrint(buffer, "{s} {s}\n", .{ pkg, clean_version });
-    try open_file.writeFile(name_version);
-}
-
-pub fn removePkgEntry(init: std.process.Init, file: []const u8, pkg: []const u8) !void {
-    var open_file = zsys.File.openFile(file, .{ .type = .read_write, .lock = .exclusive }) catch return;
-    defer open_file.close();
-
-    var reader = try open_file.readMmap();
-    defer reader.deinit();
-    const tmp_path = "/var/zp/install/packages.db.tmp";
-    var tmp_file = try zsys.File.openFile(tmp_path, .{ .create = true, .type = .read_write });
-    defer tmp_file.close();
-    var data = std.mem.tokenizeScalar(u8, reader.slice(), '\n');
-
-    while (data.next()) |line| {
-        if (line.len == 0) continue;
-        var tokens = std.mem.tokenizeScalar(u8, line, ' ');
-        const name = tokens.next() orelse continue;
-        if (std.mem.eql(u8, name, pkg)) continue;
-
-        var line_buf: [168]u8 = undefined;
-        const line_with_newline = try std.fmt.bufPrint(&line_buf, "{s}\n", .{line});
-        _ = try tmp_file.writeFile(line_with_newline);
-    }
-
-    try Dir.renameAbsolute(tmp_path, file, init.io);
+    try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__writeFileDb", list_path, pkg_item }, ".");
 }

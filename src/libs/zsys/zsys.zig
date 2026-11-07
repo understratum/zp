@@ -179,28 +179,39 @@ pub const Dir = struct {
         const fd = linux.openat(linux.AT.FDCWD, buf, O, options.mode);
         if (linux.errno(fd) != .SUCCESS) {
             const err = errnoToError(linux.errno(fd));
-            std.debug.print("Dir.open({s}): {any}\n", .{ path, err });
             return err;
         }
 
         return .{ .fd = @intCast(fd) };
     }
-    pub fn createDir(self: *Dir, name: []const u8, mode: u32) !Dir {
+    pub fn createDir(self: Dir, name: []const u8, options: DirOptions) !Dir {
         var path_buf: [4096:0]u8 = undefined;
         if (name.len > path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
-
-        const result = linux.mkdirat(self.fd, buf, mode);
-        if (linux.errno(result) != .SUCCESS) {
-            const err = errnoToError(linux.errno(result));
+        const r = linux.mkdirat(self.fd, buf, options.mode);
+        if (linux.errno(r) != .SUCCESS) {
+            const err = errnoToError(linux.errno(r));
             std.debug.print("Dir.createDir({s}): {any}\n", .{ name, err });
             return err;
         }
+        var O = linux.O{};
+        O.ACCMODE = .RDONLY;
+        O.CREAT = options.create;
+        O.CLOEXEC = options.cloexec;
+        O.NOFOLLOW = options.no_follow;
+        O.EXCL = options.exclusive;
+        O.DIRECTORY = true;
 
-        return .{ .fd = @intCast(result) };
+        const fd = linux.openat(linux.AT.FDCWD, buf, O, 0);
+        if (linux.errno(fd) != .SUCCESS) {
+            const err = errnoToError(linux.errno(fd));
+            return err;
+        }
+
+        return .{ .fd = @intCast(fd) };
     }
 
-    pub fn deleteFile(self: *Dir, name: []const u8) !void {
+    pub fn deleteFile(self: Dir, name: []const u8) !void {
         var path_buf: [4096:0]u8 = undefined;
         if (name.len > path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
@@ -208,7 +219,8 @@ pub const Dir = struct {
         const result = linux.unlinkat(self.fd, buf);
 
         if (linux.errno(result) != .SUCCESS) {
-            return error.DeleteFileFailed;
+            const err = errnoToError(linux.errno(result));
+            return err;
         }
     }
 
@@ -224,7 +236,7 @@ pub const Dir = struct {
         }
     }
 
-    pub fn openDir(self: *Dir, name: []const u8) !Dir {
+    pub fn openDir(self: Dir, name: []const u8) !Dir {
         var path_buf: [256:0]u8 = undefined;
         if (name.len > path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
@@ -237,14 +249,13 @@ pub const Dir = struct {
         const fd = linux.openat(self.fd, buf, O, 0);
         if (linux.errno(fd) != .SUCCESS) {
             const err = errnoToError(linux.errno(fd));
-            std.debug.print("Dir.openDir({s}): {any}\n", .{ name, err });
             return err;
         }
 
         return .{ .fd = @intCast(fd) };
     }
 
-    pub fn createFile(self: *Dir, name: []const u8, options: FileOptions) !File {
+    pub fn createFile(self: Dir, name: []const u8, options: FileOptions) !File {
         var opts = options;
         opts.create = true;
         return self.openFile(name, opts);
@@ -262,7 +273,7 @@ pub const Dir = struct {
     ///     defer file.close(); // close file
     /// }
     /// ```
-    pub fn openFile(self: *Dir, path: []const u8, options: FileOptions) !File {
+    pub fn openFile(self: Dir, path: []const u8, options: FileOptions) !File {
         var path_buf: [1026:0]u8 = undefined;
         if (path.len >= path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{path}, 0);
@@ -287,7 +298,6 @@ pub const Dir = struct {
         const fd: usize = linux.openat(self.fd, buf, O, options.mode);
         if (linux.errno(fd) != .SUCCESS) {
             const err = errnoToError(linux.errno(fd));
-            std.debug.print("Dir.openFile({s}): {any}\n", .{ path, err });
             return err;
         }
 
@@ -303,7 +313,6 @@ pub const Dir = struct {
             const result = linux.flock(fd_i32, lock_type);
             if (linux.errno(result) != .SUCCESS) {
                 const err = errnoToError(linux.errno(result));
-                std.debug.print("Dir.openFile({s}) lock: {any}\n", .{ path, err });
                 _ = linux.close(fd_i32);
                 return err;
             }
@@ -314,11 +323,11 @@ pub const Dir = struct {
         return .{ .fd = fd_i32, .is_locked = false };
     }
 
-    pub fn close(self: *Dir) void {
+    pub fn close(self: Dir) void {
         _ = linux.close(self.fd);
     }
 
-    pub fn iterate(self: *Dir) Iterator {
+    pub fn iterate(self: Dir) Iterator {
         return .{ .fd = self.fd };
     }
 };
@@ -365,7 +374,6 @@ pub const File = struct {
         const fd: usize = linux.open(buf, O, options.mode);
         if (linux.errno(fd) != .SUCCESS) {
             const err = errnoToError(linux.errno(fd));
-            std.debug.print("File.openFile({s}): {any}\n", .{ path, err });
             return err;
         }
 
@@ -393,7 +401,7 @@ pub const File = struct {
     }
 
     /// Close file descriptor
-    pub fn close(self: *File) void {
+    pub fn close(self: File) void {
         if (self.is_locked) {
             _ = linux.flock(self.fd, 8);
         }
@@ -401,7 +409,7 @@ pub const File = struct {
     }
 
     /// Read file
-    pub fn read(self: *File, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn read(self: File, allocator: std.mem.Allocator) ![]const u8 {
         var statx: linux.Statx = undefined;
 
         const statx_result = linux.statx(self.fd, "", linux.AT.EMPTY_PATH, linux.STATX{ .SIZE = true }, &statx);
@@ -437,13 +445,12 @@ pub const File = struct {
     }
 
     /// Read file with mmap
-    pub fn readMmap(self: *File) !MmapedFile {
+    pub fn readMmap(self: File) !MmapedFile {
         var statx: linux.Statx = undefined;
 
         const statx_result = linux.statx(self.fd, "", linux.AT.EMPTY_PATH, linux.STATX{ .SIZE = true }, &statx);
         if (linux.errno(statx_result) != .SUCCESS) {
             const err = errnoToError(linux.errno(statx_result));
-            std.debug.print("readMmap statx: {any}\n", .{err});
             return err;
         }
 
@@ -455,7 +462,6 @@ pub const File = struct {
         const mmap_result = linux.mmap(null, file_size, linux.PROT{ .READ = true }, linux.MAP{ .TYPE = .PRIVATE }, self.fd, 0);
         if (linux.errno(mmap_result) != .SUCCESS) {
             const err = errnoToError(linux.errno(mmap_result));
-            std.debug.print("readMmap mmap (size={d}): {any}\n", .{ file_size, err });
             return err;
         }
 
@@ -493,11 +499,14 @@ pub const File = struct {
     /// ## Errors
     ///
     /// - `error.WriteFailed` - disk I/O error or file opened read-only
-    pub fn writeFile(self: *File, data: []const u8) !void {
+    pub fn writeFile(self: File, data: []const u8) !void {
         var written: usize = 0;
         while (written < data.len) {
             const n = linux.write(self.fd, data[written..].ptr, data.len - written);
-            if (linux.errno(n) != .SUCCESS) return error.WriteFailed;
+            if (linux.errno(n) != .SUCCESS) {
+                const err = errnoToError(linux.errno(n));
+                return err;
+            }
             written += n;
         }
     }
@@ -538,7 +547,7 @@ pub const File = struct {
     /// ## Errors
     ///
     /// - `error.ReadError`
-    pub fn pread(self: *File, allocator: std.mem.Allocator, offset: i64) ![]const u8 {
+    pub fn pread(self: File, allocator: std.mem.Allocator, offset: i64) ![]const u8 {
         var statx: linux.Statx = undefined;
 
         const statx_result = linux.statx(self.fd, "", linux.AT.EMPTY_PATH, linux.STATX{ .SIZE = true }, &statx);
@@ -604,7 +613,7 @@ pub const File = struct {
     /// ## Errors
     ///
     /// - `error.SyncFailed` — disk I/O error or read-only filesystem
-    pub fn sync(self: *File) !void {
+    pub fn sync(self: File) !void {
         const result = linux.fsync(self.fd);
         if (linux.errno(result) != .SUCCESS) {
             return error.SyncFailed;
@@ -625,7 +634,7 @@ pub const File = struct {
     /// ## Errors
     ///
     /// - `error.SyncFailed` — disk I/O error
-    pub fn syncData(self: *File) !void {
+    pub fn syncData(self: File) !void {
         const result = linux.fdatasync(self.fd);
         if (linux.errno(result) != .SUCCESS) {
             return error.SyncFailed;
