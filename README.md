@@ -234,7 +234,7 @@ Build, fetch, extract and stage run **unprivileged**. Only the final
 copy into root and the database write happen through the
 privileged `zp __copy` chrootpoint (invoked via `sudo`). A
 compromised or buggy `BuildFile` therefore cannot touch the live
-system — it can only poison its own staging tree, which is discarded.
+system - it can only poison its own staging tree, which is discarded.
 zp refuses to build as root outright (`geteuid() == 0` → error).
 
 Because `BuildFile` is arbitrary code, anything it produces is treated
