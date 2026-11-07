@@ -37,11 +37,11 @@ Fetch. Build. Install. From source; no prebuilt binaries.
 ```
 zp add <pkg>
    │
-   ├─ 1. Lookup <pkg> in /var/zp/mirrors/zp-repo/pkgs/<pkg>/<pkg>.zon
-   ├─ 2. Download source tarball → /var/zp/install/
+   ├─ 1. Lookup <pkg> in $HOME/.local/zp/mirrors/zp-repo/pkgs/<pkg>/<pkg>.zon
+   ├─ 2. Download source tarball → $HOME/.local/zp/install/
    ├─ 3. Check sha256 hash
-   ├─ 4. Extract → /var/zp/build/<pkg> (tar --strip-components=1)
-   ├─ 5. Detect the build system and then compile the package
+   ├─ 4. Extract → $HOME/.local/zp/build/<pkg> (tar --strip-components=1)
+   ├─ 5. Compile the package
    ├─ 6. Copy staged files → system root (/)
    └─ 7. Write file list → /var/zp/installed/<pkg>.list
 ```
@@ -145,6 +145,7 @@ zp/
 │   ├── main.zig
 │   ├── parser.zig
 │   ├── types.zig
+│   ├── libs/      // zsys and ConfigLib
 │   └── actions/
 │       ├── sync.zig
 │       ├── add.zig
@@ -171,9 +172,76 @@ zig build -Doptimize=ReleaseSafe
 ```
 ---
 
-## Known Limitations
+## Configuration
 
-- **Requires root**: installation writes to system directories
+zp reads `/etc/zp/config.zon` (ZON format). Absent file = built-in
+defaults; empty file = defaults with a warning; syntactically broken
+file = hard error (zp refuses to guess).
+
+```zig
+.{
+    // Work zone — zp's scratch space. Absolute.
+    .root       = "/", // $HOME default
+
+    // install prefix - where files actually land. Absolute.
+
+    // Sub-paths are RELATIVE segments, joined as {root}/{sub}
+    // Never absolute, never with a leading or trailing "/"
+    .build_dir  = ".local/zp/build",
+    .pkg_dir    = ".local/zp/pkg",
+    .cache_dir  = ".local/zp/install",
+    .mirror_dir = ".local/zp/mirrors",
+    .db_dir     = "/var/zp/installed",
+    .jobs       = 5 // nproc jobs
+}
+```
+
+An absolute sub-path breaks this by construction (you get
+`/var/zp//var/zp/build`). zp validates sub-paths on load and rejects
+leading `/`
+
+## BuildFile contract
+
+A `BuildFile` is a POSIX `sh` script. zp runs it **without root**, with
+`cwd` set to the package source dir, and the following variables
+exported. Recipes must not contain paths, must not `cd`, and must not
+call `nproc` — everything comes from the environment:
+
+| Variable | Meaning |
+|---|---|
+| `ZP_SRC_DIR` | source tree; **already the cwd** |
+| `ZP_DESTDIR` | staging prefix for `make install` / `cmake --install` |
+| `ZP_BUILD_DIR` | work build root |
+| `ZP_PKG_DIR` | work pkg root |
+| `ZP_CACHE_DIR` | downloaded tarballs |
+| `ZP_MIRROR_DIR` | cloned repos |
+| `ZP_DB_DIR` | installed database |
+| `ZP_JOBS` | parallelism (use instead of `$(nproc)`) |
+
+A typical autotools recipe:
+
+```sh
+#!/bin/sh
+set -eu
+./configure --prefix=/usr
+make -j"$ZP_JOBS"
+make DESTDIR="$ZP_DESTDIR" install
+```
+
+### Privilege model
+
+Build, fetch, extract and stage run **unprivileged**. Only the final
+copy into root and the database write happen through the
+privileged `zp __copy` chrootpoint (invoked via `sudo`). A
+compromised or buggy `BuildFile` therefore cannot touch the live
+system — it can only poison its own staging tree, which is discarded.
+zp refuses to build as root outright (`geteuid() == 0` → error).
+
+Because `BuildFile` is arbitrary code, anything it produces is treated
+as hostile by construction: `__copy` walks the staging tree by fd,
+never follows symlinks (`O_NOFOLLOW`), copies file content (never
+hardlinks), recreates symlinks via `readlink`+`symlinkat`, and records
+every path into the database atomically in the same pass.
 
 ---
 
