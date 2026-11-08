@@ -190,7 +190,7 @@ file = hard error (zp refuses to guess).
     .build_dir  = ".local/zp/build",
     .pkg_dir    = ".local/zp/pkg",
     .cache_dir  = ".local/zp/install",
-    .mirror_dir = ".local/zp/mirrors",
+    .mirror_dir = "/var/zp/mirrors",
     .db_dir     = "/var/zp/installed",
     .jobs       = 5 // nproc jobs
 }
