@@ -118,7 +118,7 @@ sudo zp sync
 zp search htop
 
 # Install package
-sudo zp add htop
+zp add htop
 
 # List installed packages
 zp list
@@ -127,10 +127,10 @@ zp list
 sudo zp remove htop
 
 # Update specific package
-sudo zp update htop
+zp update htop
 
 # Update all installed packages
-sudo zp update
+zp update
 ```
 
 ---
@@ -190,8 +190,8 @@ file = hard error (zp refuses to guess).
     .build_dir  = ".local/zp/build",
     .pkg_dir    = ".local/zp/pkg",
     .cache_dir  = ".local/zp/install",
-    .mirror_dir = "/var/zp/mirrors",
-    .db_dir     = "/var/zp/installed",
+    .mirror_dir = "/var/zp/mirrors", // only absolute path
+    .db_dir     = "/var/zp/installed", // only absolute path
     .jobs       = 5 // nproc jobs
 }
 ```
