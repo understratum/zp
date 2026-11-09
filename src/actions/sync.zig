@@ -28,12 +28,19 @@ fn ensureDir(io: anytype, path: []const u8) !void {
     }
 }
 
+fn absSub(buf: []u8, root: []const u8, sub: []const u8) ![]const u8 {
+    return std.fmt.bufPrint(buf, "{s}/{s}", .{
+        std.mem.trimEnd(u8, root, "/"),
+        std.mem.trimEnd(u8, sub, "/"),
+    });
+}
+
 pub fn createDirectories(io: anytype, root: []const u8, config: Config) !void {
     try ensureDir(io, root);
-    const subs = [_][]const u8{ config.build_dir, config.cache_dir, config.mirror_dir, config.pkg_dir, config.db_dir, "etc/zp" };
-    for (subs) |sub| {
-        try ensureDir(io, sub);
-    }
+    try ensureDir(io, config.db_dir);
+    try ensureDir(io, config.mirror_dir);
+    const subs = [_][]const u8{ config.build_dir, config.cache_dir, config.pkg_dir };
+    for (subs) |sub| try ensureDir(io, sub);
 }
 
 pub fn init(io: anytype, allocator: std.mem.Allocator, config: Config) !void {

@@ -12,15 +12,16 @@ const copy = @import("actions/__copy.zig").copy;
 const writeFile = @import("actions/__writeFile.zig").writeFile;
 const removePkgEntry = @import("actions/__removePkgEntry.zig").removePkgEntry;
 const writeFileDb = @import("actions/__writeFileDb.zig").writeFileDb;
+const clean = @import("actions/clean.zig").clean;
 const Config = @import("libs/ConfigLib/config.zig").Config;
 const StrList = std.ArrayList([]const u8);
 
-const Action = enum { help, version, add, remove, sync, update, list, search, info, __copy, __writeFile, __removePkgEntry, __writeFileDb };
+const Action = enum { help, version, add, remove, sync, update, list, search, info, clean, __copy, __writeFile, __removePkgEntry, __writeFileDb };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
 
-    var args = try init.minimal.args.toSlice(allocator);
+    const args = try init.minimal.args.toSlice(allocator);
     var pkgs: StrList = .empty;
     var flags: StrList = .empty;
 
@@ -29,9 +30,20 @@ pub fn main(init: std.process.Init) !void {
 
     var strAction: ?[]const u8 = null;
 
-    for (args[1..]) |arg| {
+    var config_path: ?[]const u8 = null;
+
+    var i: usize = 1;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
         if (std.mem.startsWith(u8, arg, "-")) {
-            try flags.append(allocator, arg);
+            const flag = arg[1..];
+            if (std.mem.eql(u8, flag, "c")) {
+                i += 1;
+                if (i >= args.len) return error.MissingFlagValue;
+                config_path = args[i];
+            } else {
+                try flags.append(allocator, flag);
+            }
         } else {
             if (strAction == null) {
                 strAction = arg;
@@ -40,7 +52,8 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-    const config = try Config.configApply(init, allocator);
+
+    const config = try Config.configApply(init, allocator, config_path);
 
     const action = std.meta.stringToEnum(Action, strAction orelse "") orelse .help;
 
@@ -59,14 +72,14 @@ pub fn main(init: std.process.Init) !void {
 
             var threads = try allocator.alloc(std.Thread, pkgs.items.len);
 
-            for (pkgs.items, 0..) |pkg, i| {
-                threads[i] = try std.Thread.spawn(.{}, struct {
+            for (pkgs.items, 0..) |pkg, p| {
+                threads[p] = try std.Thread.spawn(.{}, struct {
                     fn run(index: usize, init_: std.process.Init, pkg_: []const u8, allocator_: std.mem.Allocator, config_: Config, results_: []ThreadResult) void {
                         add(init_, pkg_, allocator_, config_) catch |err| {
                             results_[index].err = err;
                         };
                     }
-                }.run, .{ i, init, pkg, allocator, config, results });
+                }.run, .{ p, init, pkg, allocator, config, results });
             }
 
             for (threads) |t| {
@@ -103,6 +116,9 @@ pub fn main(init: std.process.Init) !void {
             for (pkgs.items) |item| {
                 try info(item, allocator, config);
             }
+        },
+        .clean => {
+            try clean(config);
         },
         .__copy => {
             try copy(init.io, allocator, args[2], args[3], args[4], args[5], args[6], config);

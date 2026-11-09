@@ -15,17 +15,22 @@ pub const HELP_TEXT =
     \\  update        Update system packages with current mirrors
     \\  list          Print your installed pkgs
     \\  info <pkg>    Print info about package
+    \\  clean         Clear cache (tar files)
+    \\  -c <file>     Use another configuration
+    \\                without /etc/zp/config.zon
     \\
     \\
     \\Examples:
-    \\  sudo zp sync                # Sync recipe trees (Void)
-    \\  sudo zp search htop         # Search for htop
-    \\  sudo zp add htop            # Build & install htop from source
-    \\  sudo zp remove htop         # Remove htop
-    \\  sudo zp update htop         # Upgrade htop on new version
-    \\  sudo zp update              # Upgrade your system
-    \\  sudo zp list                # Print your installed pkgs
-    \\  sudo zp info htop           # Print about htop
+    \\  sudo zp sync           # Sync recipe trees (Void)
+    \\  zp search htop         # Search for htop
+    \\  zp add htop            # Build & install htop from source
+    \\  sudo zp remove htop    # Remove htop
+    \\  zp update htop         # Upgrade htop on new version
+    \\  zp update              # Upgrade your system
+    \\  zp list                # Print your installed pkgs
+    \\  zp info htop           # Print about htop
+    \\  zp clean               # Clear cache
+    \\  zp -c /etc/myconf.zon  # Use another configuration
     \\
     \\For more information, visit: https://github.com/understratum/zp/
 ;

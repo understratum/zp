@@ -216,7 +216,7 @@ pub const Dir = struct {
         if (name.len > path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, "{s}", .{name}, 0);
 
-        const result = linux.unlinkat(self.fd, buf);
+        const result = linux.unlinkat(self.fd, buf, 0);
 
         if (linux.errno(result) != .SUCCESS) {
             const err = errnoToError(linux.errno(result));
@@ -229,7 +229,7 @@ pub const Dir = struct {
         if (path.len > path_buf.len) return error.PathTooLong;
         const buf = try std.fmt.bufPrintSentinel(&path_buf, path, .{}, 0);
 
-        const result = linux.unlink(buf);
+        const result = linux.unlink(buf, 0);
 
         if (linux.errno(result) != .SUCCESS) {
             return error.DeleteFileFailed;

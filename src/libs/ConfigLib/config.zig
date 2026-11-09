@@ -12,6 +12,9 @@ pub const Config = struct {
     verify_hash: bool = true,
     jobs: usize = 1,
 
+    //config file def
+    config_file: []const u8 = "/etc/zp/config.zon",
+
     pub fn parseConfig(allocator: std.mem.Allocator, src: [:0]const u8) !Config {
         var diag: std.zon.parse.Diagnostics = .{ .errors = &.{} };
         return std.zon.parse.fromSlice(Config, .{ .gpa = allocator, .arena = allocator, .source = src, .ignore_unknown_fields = true, .diagnostics = &diag }) catch |err| switch (err) {
@@ -23,10 +26,10 @@ pub const Config = struct {
         };
     }
 
-    pub fn configApply(init: std.process.Init, allocator: std.mem.Allocator) !Config {
+    pub fn configApply(init: std.process.Init, allocator: std.mem.Allocator, path: ?[]const u8) !Config {
         const home = init.minimal.environ.getPosix("HOME") orelse return error.HomeNotSet;
         var cfg: Config = blk: {
-            const data = zsys.File.readPath("/etc/zp/config.zon", allocator) catch |e| switch (e) {
+            const data = zsys.File.readPath(path orelse "/etc/zp/config.zon", allocator) catch |e| switch (e) {
                 error.FileNotFound => break :blk Config{},
                 else => return e,
             };
@@ -40,7 +43,7 @@ pub const Config = struct {
 
         const root_raw = if (cfg.root.len > 0) cfg.root else home;
         cfg.root = try fixPath(root_raw, allocator);
-        cfg.db_dir = try std.fmt.allocPrint(allocator, "{s}", .{try fixPath(cfg.db_dir, allocator)});
+        cfg.db_dir = try fixPath(cfg.db_dir, allocator);
         cfg.pkg_dir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ cfg.root, try fixPath(cfg.pkg_dir, allocator) });
         cfg.build_dir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ cfg.root, try fixPath(cfg.build_dir, allocator) });
         cfg.mirror_dir = try std.fmt.allocPrint(allocator, "{s}", .{try fixPath(cfg.mirror_dir, allocator)});
