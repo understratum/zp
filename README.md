@@ -107,6 +107,7 @@ sudo zp sync
 | `zp update [pkg]` | Update specific package or all packages |
 | `zp version` | Show version information |
 | `zp help` | Show help message |
+| `zp clean` | Clear cache |
 
 ### Examples
 
@@ -131,6 +132,9 @@ zp update htop
 
 # Update all installed packages
 zp update
+
+# Clear cache (tar files)
+zp clean
 ```
 
 ---
