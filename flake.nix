@@ -48,7 +48,7 @@
         {
           default = pkgs.mkShell {
             packages = [
-              pkgs.zig_0_16
+              pkgs.zig_0_17
             ];
           };
         }
