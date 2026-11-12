@@ -4,7 +4,7 @@ const zsys = @import("../libs/zsys/zsys.zig");
 const Config = @import("../libs/ConfigLib/config.zig").Config;
 
 pub fn search(pkg_item: []const u8, allocator: std.mem.Allocator, config: Config) !std.ArrayList([]const u8) {
-    var dir = try zsys.Dir.open(try std.fmt.allocPrint(allocator, "{s}zp-repo/pkgs/", .{ config.mirror_dir }), .{ .type = .read, .iterate = true });
+    var dir = try zsys.Dir.open(try std.fmt.allocPrint(allocator, "{s}zp-repo/pkgs/", .{config.mirror_dir}), .{ .type = .read, .iterate = true });
     defer dir.close();
 
     var massive: std.ArrayList([]const u8) = .empty;

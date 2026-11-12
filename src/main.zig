@@ -13,10 +13,11 @@ const writeFile = @import("actions/__writeFile.zig").writeFile;
 const removePkgEntry = @import("actions/__removePkgEntry.zig").removePkgEntry;
 const writeFileDb = @import("actions/__writeFileDb.zig").writeFileDb;
 const clean = @import("actions/clean.zig").clean;
+const runProcess = @import("actions/add.zig").runProcess;
 const Config = @import("libs/ConfigLib/config.zig").Config;
 const StrList = std.ArrayList([]const u8);
 
-const Action = enum { help, version, add, remove, sync, update, list, search, info, clean, __copy, __writeFile, __removePkgEntry, __writeFileDb };
+const Action = enum { help, version, add, remove, sync, update, list, search, info, clean, __copy, __writeFile, __removePkgEntry, __writeFileDb, __remove };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
@@ -93,7 +94,7 @@ pub fn main(init: std.process.Init) !void {
             }
         },
         .remove => for (pkgs.items) |pkg| {
-            try remove(init, pkg, config);
+            try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__remove", pkg }, ".");
         },
         .sync => _ = try initialize.sync(init.io, allocator, config),
         .update => if (pkgs.items.len == 0) {
@@ -131,6 +132,9 @@ pub fn main(init: std.process.Init) !void {
         },
         .__writeFileDb => {
             try writeFileDb(init, args[2], args[3], allocator, config);
+        },
+        .__remove => {
+            try remove(init, args[2], config);
         },
     }
 }

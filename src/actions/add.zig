@@ -114,12 +114,24 @@ pub fn createDirPath(io: anytype, base_dir: Dir, path: []const u8) !void {
 }
 
 pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator, config: Config) !void {
-    const root = try Dir.openDirAbsolute(init.io, "/", .{});
-    defer root.close(init.io);
+    var tar_installed: bool = false;
     const packages_db = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
     const cache_dir = try std.fmt.allocPrint(allocator, "{s}", .{config.cache_dir});
     const pkg = try p.GetPkgStatToInstall(pkg_item, allocator, config);
+    const file_db = try zsys.File.readPath(packages_db, allocator);
+    if ((std.mem.find(u8, file_db, pkg.name) != null) or try zsys.File.exists(try std.fmt.allocPrint(allocator, "{s}{s}.list", .{ config.db_dir, pkg.name }))) {
+        std.log.err("Package '{0s}' already installed. If it's a bug - try zp remove '{0s}'\n", .{pkg.name});
+        return error.AlreadyInstalled;
+    }
+
+    const root = try Dir.openDirAbsolute(init.io, "/", .{});
+    defer root.close(init.io);
     const file_name = if (std.mem.lastIndexOfScalar(u8, pkg.url, '/')) |i| pkg.url[i + 1 ..] else pkg.url;
+    const path_buf: []const u8 = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.cache_dir, file_name });
+
+    if (try zsys.File.exists(path_buf)) {
+        tar_installed = true;
+    }
 
     const installedPkgs = try p.GetInstalledPkgs(allocator, config);
 
@@ -133,12 +145,12 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
         }
         if (!found) try add(init, dep, allocator, config);
     }
+    if (!tar_installed) {
+        std.log.info("Installing tar file '{s}'...\n", .{pkg_item});
 
-    std.log.info("Installing tar file '{s}'...\n", .{pkg_item});
-
-    const argv = [_][]const u8{ "curl", "-fSL", "-o", file_name, pkg.url };
-    try runProcess(init.io, &argv, cache_dir);
-    const path_buf: []const u8 = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.cache_dir, file_name });
+        const argv = [_][]const u8{ "curl", "-fSL", "-o", file_name, pkg.url };
+        try runProcess(init.io, &argv, cache_dir);
+    }
 
     if (config.verify_hash) {
         const check = try checkHex(path_buf, pkg.hash, allocator);
