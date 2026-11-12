@@ -56,10 +56,13 @@ zp add <pkg>
 ## Filesystem Layout
 
 ```
+$HOME/
+├── .local/zp/
+|   ├── pkg/      # Compiled binaries
+|   ├── build/    # Compiling the package
+└── —— install    # cache (tar files)
+
 /var/zp/
-├── build/           # Extracted source code (one dir per package)
-├── install/         # Downloaded tarballs (cache)
-├── pkg/             # Staging directory (make install DESTDIR)
 ├── installed/       # File lists for installed packages
 │   ├── htop.list
 │   └── curl.list
