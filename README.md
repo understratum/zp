@@ -125,7 +125,7 @@ zp add htop
 zp list
 
 # Remove package
-sudo zp remove htop
+zp remove htop
 
 # Update specific package
 zp update htop
@@ -157,6 +157,7 @@ zp/
 │       ├── search.zig
 │       ├── list.zig
 │       ├── update.zig
+|       ├── clean.zig
 │       ├── version.zig
 │       └── help.zig
 ├── LICENSE
@@ -185,7 +186,7 @@ file = hard error (zp refuses to guess).
 ```zig
 .{
     // Work zone — zp's scratch space. Absolute.
-    .root       = "/", // $HOME default
+    .root       = "", // $HOME default
 
     // install prefix - where files actually land. Absolute.
 
