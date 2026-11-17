@@ -19,7 +19,7 @@ pub fn updatePkg(init: std.process.Init, pkg_name: []const u8, allocator: std.me
 
         if (!std.mem.eql(u8, iv, pkg.version)) {
             std.log.info("Updating {s}: {s} → {s}\n", .{ pkg_name, iv, pkg.version });
-            try a.add(init, pkg_name, allocator, config);
+            try a.add(init, pkg_name, allocator, config, true);
         } else {
             std.debug.print("{s} is up to date ({s})\n", .{ pkg_name, iv });
         }

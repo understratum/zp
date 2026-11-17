@@ -113,13 +113,13 @@ pub fn createDirPath(io: anytype, base_dir: Dir, path: []const u8) !void {
     }
 }
 
-pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator, config: Config) !void {
+pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator, config: Config, update: bool) !void {
     var tar_installed: bool = false;
     const packages_db = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
     const cache_dir = try std.fmt.allocPrint(allocator, "{s}", .{config.cache_dir});
     const pkg = try p.GetPkgStatToInstall(pkg_item, allocator, config);
     const file_db = try zsys.File.readPath(packages_db, allocator);
-    if ((std.mem.find(u8, file_db, pkg.name) != null) or try zsys.File.exists(try std.fmt.allocPrint(allocator, "{s}{s}.list", .{ config.db_dir, pkg.name }))) {
+    if ((std.mem.find(u8, file_db, pkg.name) != null or try zsys.File.exists(try std.fmt.allocPrint(allocator, "{s}{s}.list", .{ config.db_dir, pkg.name }))) and !update) {
         std.log.err("Package '{0s}' already installed. If it's a bug - try zp remove '{0s}'\n", .{pkg.name});
         return error.AlreadyInstalled;
     }
@@ -129,7 +129,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     const file_name = if (std.mem.lastIndexOfScalar(u8, pkg.url, '/')) |i| pkg.url[i + 1 ..] else pkg.url;
     const path_buf: []const u8 = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.cache_dir, file_name });
 
-    if (try zsys.File.exists(path_buf)) {
+    if (try zsys.File.exists(path_buf) and !update) {
         tar_installed = true;
     }
 
@@ -143,7 +143,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
                 break;
             }
         }
-        if (!found) try add(init, dep, allocator, config);
+        if (!found) try add(init, dep, allocator, config, false);
     }
     if (!tar_installed) {
         std.log.info("Installing tar file '{s}'...\n", .{pkg_item});
@@ -167,7 +167,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
         std.log.warn("Check hash: false. Continue...", .{});
     }
 
-    var tar_cmd_buf: [8096]u8 = undefined;
+    var tar_cmd_buf: [4096]u8 = undefined;
 
     const build_dir = try std.fmt.allocPrint(allocator, "{s}{s}", .{ config.build_dir, pkg_item });
     try root.deleteTree(init.io, build_dir);
