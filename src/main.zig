@@ -75,12 +75,12 @@ pub fn main(init: std.process.Init) !void {
 
             for (pkgs.items, 0..) |pkg, p| {
                 threads[p] = try std.Thread.spawn(.{}, struct {
-                    fn run(index: usize, init_: std.process.Init, pkg_: []const u8, allocator_: std.mem.Allocator, config_: Config, results_: []ThreadResult) void {
-                        add(init_, pkg_, allocator_, config_) catch |err| {
+                    fn run(index: usize, init_: std.process.Init, pkg_: []const u8, allocator_: std.mem.Allocator, config_: Config, update_: bool, results_: []ThreadResult) void {
+                        add(init_, pkg_, allocator_, config_, update_) catch |err| {
                             results_[index].err = err;
                         };
                     }
-                }.run, .{ p, init, pkg, allocator, config, results });
+                }.run, .{ p, init, pkg, allocator, config, false, results });
             }
 
             for (threads) |t| {
