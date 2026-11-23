@@ -1,6 +1,6 @@
 const std = @import("std");
 const Dir = std.Io.Dir;
-const runProcess = @import("add.zig").runProcess;
+const runProcess = @import("runProcess.zig").runProcess;
 const zsys = @import("../libs/zsys/zsys.zig");
 const Config = @import("../libs/ConfigLib/config.zig").Config;
 

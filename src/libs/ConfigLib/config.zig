@@ -11,6 +11,7 @@ pub const Config = struct {
     keep_build: bool = false,
     verify_hash: bool = true,
     jobs: usize = 1,
+    skip_hooks: bool = false,
 
     //config file def
     config_file: []const u8 = "/etc/zp/config.zon",

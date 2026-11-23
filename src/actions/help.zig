@@ -12,7 +12,8 @@ pub const HELP_TEXT =
     \\  remove <pkg>  Remove an installed package
     \\  help          Show this help message and exit
     \\  version       Show version information and exit
-    \\  update        Update system packages with current mirrors
+    \\  update        Update system packages with current mirrors\
+    \\  unpack        Does not reinstall the tar file (works if the file already exists)
     \\  list          Print your installed pkgs
     \\  info <pkg>    Print info about package
     \\  clean         Clear cache (tar files)
@@ -30,6 +31,7 @@ pub const HELP_TEXT =
     \\  zp list                # Print your installed pkgs
     \\  zp info htop           # Print about htop
     \\  zp clean               # Clear cache
+    \\  zp unpack htop         # Build htop from cache
     \\  zp -c /etc/myconf.zon  # Use another configuration
     \\
     \\For more information, visit: https://github.com/understratum/zp/

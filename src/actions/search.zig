@@ -14,7 +14,7 @@ pub fn search(pkg_item: []const u8, allocator: std.mem.Allocator, config: Config
         switch (entry.kind) {
             .directory => {
                 if (std.mem.indexOf(u8, entry.name, pkg_item)) |_| {
-                    try massive.append(allocator, entry.name);
+                    try massive.append(allocator, try allocator.dupe(u8, entry.name));
                 }
             },
             else => {},

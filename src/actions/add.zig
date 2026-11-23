@@ -3,6 +3,8 @@ const p = @import("../parser.zig");
 const e = @import("../types.zig").Error;
 const Dir = std.Io.Dir;
 const zsys = @import("../libs/zsys/zsys.zig");
+const runProcess = @import("runProcess.zig").runProcess;
+const Options = @import("../types.zig").Options;
 const Sha256 = std.crypto.hash.sha2.Sha256;
 const Config = @import("../libs/ConfigLib/config.zig").Config;
 
@@ -75,21 +77,6 @@ pub fn checkHex(src: []const u8, expected_hash: []const u8, allocator: std.mem.A
     return std.mem.eql(u8, hex, expected_hash);
 }
 
-pub fn runProcess(io: anytype, argv: []const []const u8, path: []const u8) !void {
-    var child = try std.process.spawn(io, .{
-        .argv = argv,
-        .cwd = .{ .path = path },
-        .stdout = .inherit,
-        .stderr = .inherit,
-        .stdin = .inherit,
-    });
-    const term = try child.wait(io);
-    switch (term) {
-        .exited => |code| if (code != 0) return error.ProcessFailed,
-        else => return error.ProcessFailed,
-    }
-}
-
 pub fn createDirPath(io: anytype, base_dir: Dir, path: []const u8) !void {
     var cur: Dir = base_dir;
     var is_base: bool = true;
@@ -113,15 +100,23 @@ pub fn createDirPath(io: anytype, base_dir: Dir, path: []const u8) !void {
     }
 }
 
-pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator, config: Config, update: bool) !void {
+pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allocator, config: Config, options: Options) !void {
     var tar_installed: bool = false;
+    var update: bool = false;
     const packages_db = try std.fmt.allocPrint(allocator, "{s}packages.db", .{config.db_dir});
     const cache_dir = try std.fmt.allocPrint(allocator, "{s}", .{config.cache_dir});
     const pkg = try p.GetPkgStatToInstall(pkg_item, allocator, config);
     const file_db = try zsys.File.readPath(packages_db, allocator);
-    if ((std.mem.find(u8, file_db, pkg.name) != null or try zsys.File.exists(try std.fmt.allocPrint(allocator, "{s}{s}.list", .{ config.db_dir, pkg.name }))) and !update) {
-        std.log.err("Package '{0s}' already installed. If it's a bug - try zp remove '{0s}'\n", .{pkg.name});
-        return error.AlreadyInstalled;
+
+    switch (options) {
+        .update => update = true,
+        .unpack => tar_installed = true,
+        .nothing => {
+            if (std.mem.find(u8, file_db, pkg.name) != null or try zsys.File.exists(try std.fmt.allocPrint(allocator, "{s}{s}.list", .{ config.db_dir, pkg.name }))) {
+                std.log.err("Package '{0s}' already installed. If it's a bug - try zp remove '{0s}'\n", .{pkg.name});
+                return error.AlreadyInstalled;
+            }
+        },
     }
 
     const root = try Dir.openDirAbsolute(init.io, "/", .{});
@@ -143,7 +138,7 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
                 break;
             }
         }
-        if (!found) try add(init, dep, allocator, config, false);
+        if (!found) try add(init, dep, allocator, config, .update);
     }
     if (!tar_installed) {
         std.log.info("Installing tar file '{s}'...\n", .{pkg_item});
@@ -216,4 +211,13 @@ pub fn add(init: std.process.Init, pkg_item: []const u8, allocator: std.mem.Allo
     try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__writeFile", packages_db, pkg_item, pkg.version }, ".");
 
     try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "__writeFileDb", list_path, pkg_item }, ".");
+
+    if (!config.skip_hooks) {
+        for (pkg.hooks.post_install) |hook_cmd| {
+            if (std.mem.trim(u8, hook_cmd, " \t\r\n").len == 0) continue;
+            try runProcess(init.io, &[_][]const u8{ "sudo", "zp", "runProcess", hook_cmd, "." }, ".");
+        }
+    } else {
+        std.log.warn("SKIP HOOKS...\n", .{});
+    }
 }

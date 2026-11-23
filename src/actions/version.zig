@@ -1,6 +1,6 @@
 const std = @import("std");
 const build_options = @import("build_options");
 
-pub fn version() void {
+pub inline fn version() void {
     std.debug.print("zp version {s}\n", .{build_options.version});
 }

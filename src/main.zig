@@ -13,11 +13,14 @@ const writeFile = @import("actions/__writeFile.zig").writeFile;
 const removePkgEntry = @import("actions/__removePkgEntry.zig").removePkgEntry;
 const writeFileDb = @import("actions/__writeFileDb.zig").writeFileDb;
 const clean = @import("actions/clean.zig").clean;
-const runProcess = @import("actions/add.zig").runProcess;
+const runProcess = @import("actions/runProcess.zig").runProcess;
+const unpack = @import("actions/unpack.zig").unpack;
+const Options = @import("types.zig").Options;
 const Config = @import("libs/ConfigLib/config.zig").Config;
+
 const StrList = std.ArrayList([]const u8);
 
-const Action = enum { help, version, add, remove, sync, update, list, search, info, clean, __copy, __writeFile, __removePkgEntry, __writeFileDb, __remove };
+const Action = enum { help, version, add, remove, sync, update, unpack, list, search, info, clean, __runProcess, __copy, __writeFile, __removePkgEntry, __writeFileDb, __remove };
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
@@ -32,7 +35,6 @@ pub fn main(init: std.process.Init) !void {
     var strAction: ?[]const u8 = null;
 
     var config_path: ?[]const u8 = null;
-
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
@@ -53,7 +55,6 @@ pub fn main(init: std.process.Init) !void {
             }
         }
     }
-
     const config = try Config.configApply(init, allocator, config_path);
 
     const action = std.meta.stringToEnum(Action, strAction orelse "") orelse .help;
@@ -75,12 +76,12 @@ pub fn main(init: std.process.Init) !void {
 
             for (pkgs.items, 0..) |pkg, p| {
                 threads[p] = try std.Thread.spawn(.{}, struct {
-                    fn run(index: usize, init_: std.process.Init, pkg_: []const u8, allocator_: std.mem.Allocator, config_: Config, update_: bool, results_: []ThreadResult) void {
-                        add(init_, pkg_, allocator_, config_, update_) catch |err| {
+                    fn run(index: usize, init_: std.process.Init, pkg_: []const u8, allocator_: std.mem.Allocator, config_: Config, options_: Options, results_: []ThreadResult) void {
+                        add(init_, pkg_, allocator_, config_, options_) catch |err| {
                             results_[index].err = err;
                         };
                     }
-                }.run, .{ p, init, pkg, allocator, config, false, results });
+                }.run, .{ p, init, pkg, allocator, config, .nothing, results });
             }
 
             for (threads) |t| {
@@ -113,6 +114,11 @@ pub fn main(init: std.process.Init) !void {
                 std.debug.print("{s}\n", .{item});
             }
         },
+        .unpack => {
+            for (pkgs.items) |pkg| {
+                try unpack(init, pkg, config, allocator);
+            }
+        },
         .info => {
             for (pkgs.items) |item| {
                 try info(item, allocator, config);
@@ -135,6 +141,10 @@ pub fn main(init: std.process.Init) !void {
         },
         .__remove => {
             try remove(init, args[2], config);
+        },
+        .__runProcess => {
+            const cmd_argv = [_][]const u8{args[2]};
+            try runProcess(init.io, &cmd_argv, args[3]);
         },
     }
 }
