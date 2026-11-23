@@ -27,6 +27,7 @@ Fetch. Build. Install. From source; no prebuilt binaries.
 - **Source-based installation**: complete `fetch → unpack → build → install` pipeline
 - **File tracking**: tracks installed files for proper removal
 - **Parallel downloads**: multiple packages download simultaneously
+- **Automatic dependency resolution**: Packages can declare deps, and zp automatically downloads and installs missing dependencies before installing the target package.
 
 ---
 
@@ -111,6 +112,7 @@ sudo zp sync
 | `zp version` | Show version information |
 | `zp help` | Show help message |
 | `zp clean` | Clear cache |
+| `zp unpack` | Does not reinstall the tar file (works if the file already exists) |
 
 ### Examples
 
@@ -138,6 +140,9 @@ zp update
 
 # Clear cache (tar files)
 zp clean
+
+# Build package from cache
+zp unpack htop
 ```
 
 ---
